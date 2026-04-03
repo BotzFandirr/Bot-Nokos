@@ -55,13 +55,13 @@ async function smartEdit(bot, query, text, options) {
 }
 
 // --- FUNGSI REFUND (PENGEMBALIAN DANA) ---
-async function processRefund(bot, db, userId, orderId, amount, reason, query) {
+async function processRefund(bot, db, userId, orderId, amount, reason, query, finalStatus = 'canceled') {
     // 1. Kembalikan Saldo
     await db.tambahSaldo(userId, amount);
     // 2. Hapus Order Aktif
     await db.removeOrder(orderId);
     // 3. Update Riwayat Lokal
-    await db.updateOrderHistoryStatus(userId, orderId, 'canceled', { refunded: true, cancel_reason: reason });
+    await db.updateOrderHistoryStatus(userId, orderId, finalStatus, { refunded: true, cancel_reason: reason });
     
     const saldoBaru = await db.cekSaldo(userId);
 
@@ -158,7 +158,7 @@ async function handleOrderCallback(bot, db, settings, query) {
                         headers: getHeaders()
                     });
                 } catch (err) {}
-                await processRefund(bot, db, userId, orderId, orderData.harga, "Waktu Habis (Expired)", query);
+                await processRefund(bot, db, userId, orderId, orderData.harga, "Waktu Habis (Expired)", query, 'expired');
                 return; 
             }
 
@@ -179,7 +179,7 @@ async function handleOrderCallback(bot, db, settings, query) {
             if (status === 'canceled' || status === 'expired') {
                 // JIKA BATAL/EXPIRED -> REFUND
                 await bot.answerCallbackQuery(query.id, { text: "❌ Order dibatalkan server, memproses refund...", show_alert: true });
-                await processRefund(bot, db, userId, orderId, orderData.harga, "Dibatalkan Server/Expired", query);
+                await processRefund(bot, db, userId, orderId, orderData.harga, "Dibatalkan Server/Expired", query, 'expired');
                 return;
             
             } else if (otp && otp !== '-' && (status === 'received' || status === 'completed')) {
@@ -272,7 +272,7 @@ async function handleOrderCallback(bot, db, settings, query) {
                  return bot.answerCallbackQuery(query.id, { text: `❌ Gagal: ${errMsg}`, show_alert: true });
             }
 
-            await processRefund(bot, db, userId, orderId, orderData.harga, "Canceled by User", query);
+            await processRefund(bot, db, userId, orderId, orderData.harga, "Canceled by User", query, 'canceled');
         }
     } catch (e) {
         console.error("Callback Error:", e);

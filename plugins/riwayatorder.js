@@ -2,6 +2,7 @@
 
 const moment = require('moment'); 
 require('moment/locale/id'); 
+const axios = require('axios');
 
 // LIMIT: 10 Transaksi per halaman
 const ITEMS_PER_PAGE = 10; 
@@ -68,9 +69,11 @@ function generateRiwayatPage(allLines, userId, currentPage = 1) {
 }
 
 // 4. [FIX] Fungsi Fetch & Cache (Dipakai ulang agar tidak error expired)
-async function fetchAndCacheHistory(db, userId) {
-    const history = await db.getOrderHistory(userId);
+async function fetchAndCacheHistory(db, settings, userId) {
+    let history = await db.getOrderHistory(userId);
     if (!history || history.length === 0) return null;
+
+    history = await syncRecentStatuses(db, settings, userId, history);
 
     // Sorting Terbaru diatas
     history.sort((a, b) => {
@@ -98,6 +101,70 @@ async function fetchAndCacheHistory(db, userId) {
     return allLines;
 }
 
+async function syncRecentStatuses(db, settings, userId, history) {
+    const now = Date.now();
+    let hasUpdate = false;
+    const synced = [];
+
+    for (const order of history) {
+        const currentStatus = String(order.status || '').toLowerCase();
+
+        if (currentStatus === 'success' || currentStatus === 'canceled' || currentStatus === 'expired') {
+            synced.push(order);
+            continue;
+        }
+
+        let nextStatus = currentStatus || 'pending';
+        let extraData = {};
+
+        if (settings?.rumahOtpApiKey && order.orderId) {
+            try {
+                const res = await axios.get(`https://www.rumahotp.com/api/v1/orders/get_status`, {
+                    params: { order_id: order.orderId },
+                    headers: { 'x-apikey': settings.rumahOtpApiKey, 'Accept': 'application/json' },
+                    timeout: 5000
+                });
+                const apiData = res.data?.data;
+                const apiStatus = String(apiData?.status || '').toLowerCase();
+                const apiOtp = apiData?.otp_code;
+
+                if (apiStatus === 'received' || apiStatus === 'completed' || apiStatus === 'success') {
+                    nextStatus = 'success';
+                    if (apiOtp && apiOtp !== '-') extraData.otp_code = apiOtp;
+                } else if (apiStatus === 'expired' || apiStatus === 'expiring' || apiStatus === 'timeout') {
+                    nextStatus = 'expired';
+                    extraData.cancel_reason = 'Expired dari sinkron API riwayat';
+                } else if (apiStatus === 'canceled' || apiStatus === 'cancelled') {
+                    nextStatus = 'canceled';
+                    extraData.cancel_reason = 'Canceled dari sinkron API riwayat';
+                } else {
+                    nextStatus = 'pending';
+                }
+            } catch (e) {}
+        }
+
+        if (nextStatus === 'pending') {
+            const orderTime = new Date(order.tanggal || order.updated_at || 0).getTime();
+            const isLocallyExpired = orderTime && (now - orderTime) >= (20 * 60 * 1000);
+            if (isLocallyExpired) {
+                nextStatus = 'expired';
+                extraData.cancel_reason = 'Expired saat sinkron riwayat';
+            }
+        }
+
+        if (nextStatus !== currentStatus) {
+            await db.updateOrderHistoryStatus(userId, order.orderId, nextStatus, extraData);
+            synced.push({ ...order, status: nextStatus, ...extraData });
+            hasUpdate = true;
+            continue;
+        }
+
+        synced.push(order);
+    }
+
+    return hasUpdate ? synced : history;
+}
+
 module.exports = (bot, db, settings, pendingDeposits, query) => {
 
     // A. HANDLER TOMBOL
@@ -123,7 +190,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                 if (!cacheData) {
                     // Coba fetch ulang
                     try {
-                        cacheData = await fetchAndCacheHistory(db, userId);
+                    cacheData = await fetchAndCacheHistory(db, settings, userId);
                     } catch (e) { console.error(e); }
                 }
 
@@ -158,7 +225,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                     const loadingMsg = await bot.sendMessage(chatId, "⏳ *Sedang memuat data...*", { parse_mode: 'Markdown' });
 
                     // Ambil Data
-                    const allLines = await fetchAndCacheHistory(db, userId);
+                    const allLines = await fetchAndCacheHistory(db, settings, userId);
 
                     if (!allLines) {
                          await bot.editMessageText("📭 Anda belum memiliki riwayat pesanan.", {
@@ -198,7 +265,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const loadingMsg = await bot.sendMessage(chatId, "⏳ Memuat...", {});
 
         try {
-            const allLines = await fetchAndCacheHistory(db, userId);
+            const allLines = await fetchAndCacheHistory(db, settings, userId);
             
             if (!allLines) {
                 return bot.editMessageText("📭 Anda belum memiliki riwayat pesanan.", {
