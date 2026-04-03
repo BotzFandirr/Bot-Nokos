@@ -1,6 +1,8 @@
 // plugins/topuser.js
 
 const backKeyboard = require('../utils/backKeyboard');
+const ITEMS_PER_PAGE = 10;
+let topCache = {};
 
 async function sendSafeReply(bot, chatId, text, options) {
   try {
@@ -33,15 +35,22 @@ async function getTopUserLeaderboard(bot, db) {
     });
 
     allUsers.sort((a, b) => b.orderCount - a.orderCount);
-    const top10Users = allUsers.slice(0, 10);
+    return allUsers.filter(u => u.orderCount > 0);
+}
 
-    // [FIX] Karakter ( dan ) di judul di-escape
-    let leaderboardText = "*🏆 Top 10 Pengguna \\(Order Terbanyak\\) 🏆*\n\n";
-    let rank = 1;
+async function renderTopPage(bot, sortedUsers, page = 1) {
+    const totalItems = sortedUsers.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const start = (safePage - 1) * ITEMS_PER_PAGE;
+    const items = sortedUsers.slice(start, start + ITEMS_PER_PAGE);
 
-    for (const user of top10Users) {
-        if (user.orderCount === 0) continue; 
-        
+    let leaderboardText = "*🏆 Top Pengguna \\(Order Terbanyak\\) 🏆*\n\n";
+    leaderboardText += `Total user berorder: *${totalItems}*\n`;
+    leaderboardText += `Halaman: *${safePage}/${totalPages}*\n\n`;
+
+    let rank = start + 1;
+    for (const user of items) {
         let userName = `User \\(${escapeMarkdown(user.userId)}\\)`; 
         
         try {
@@ -71,11 +80,23 @@ async function getTopUserLeaderboard(bot, db) {
         rank++;
     }
 
-    if (rank === 1) {
+    if (items.length === 0) {
          leaderboardText = "*Belum ada pengguna yang melakukan pesanan\\.*";
     }
-    
-    return leaderboardText;
+
+    const buttons = [];
+    if (safePage > 1) {
+        buttons.push({ text: "⬅️ Sebelumnya", callback_data: `top_page:${safePage - 1}` });
+    }
+    buttons.push({ text: "🏠 Menu Utama", callback_data: "start" });
+    if (safePage < totalPages) {
+        buttons.push({ text: "Selanjutnya ➡️", callback_data: `top_page:${safePage + 1}` });
+    }
+
+    return {
+        text: leaderboardText,
+        reply_markup: { inline_keyboard: [buttons] }
+    };
 }
 
 
@@ -87,19 +108,27 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             const messageId = query.message.message_id;
 
             try {
+                const data = (query.data || "").toLowerCase();
                 await bot.editMessageCaption("⏳ Menganalisis data... Ini mungkin perlu waktu...", {
                     chat_id: chatId,
                     message_id: messageId,
                     parse_mode: 'Markdown'
                 });
 
-                const leaderboardText = await getTopUserLeaderboard(bot, db);
-                
-                await bot.editMessageCaption(leaderboardText, {
+                let sortedUsers = topCache[chatId];
+                if (!sortedUsers || data === 'topuser') {
+                    sortedUsers = await getTopUserLeaderboard(bot, db);
+                    topCache[chatId] = sortedUsers;
+                }
+
+                const page = data.startsWith('top_page:') ? parseInt(data.split(':')[1], 10) : 1;
+                const pageData = await renderTopPage(bot, sortedUsers, page);
+
+                await bot.editMessageCaption(pageData.text, {
                     chat_id: chatId,
                     message_id: messageId,
                     parse_mode: "MarkdownV2",
-                    reply_markup: backKeyboard()
+                    reply_markup: pageData.reply_markup
                 });
 
             } catch (e) {
@@ -127,12 +156,14 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         if (!waitMsg) return;
 
         try {
-            const leaderboardText = await getTopUserLeaderboard(bot, db);
+            const sortedUsers = await getTopUserLeaderboard(bot, db);
+            const pageData = await renderTopPage(bot, sortedUsers, 1);
 
-            await bot.editMessageText(leaderboardText, {
+            await bot.editMessageText(pageData.text, {
                 chat_id: chatId,
                 message_id: waitMsg.message_id,
-                parse_mode: "MarkdownV2"
+                parse_mode: "MarkdownV2",
+                reply_markup: pageData.reply_markup
             });
 
         } catch (error) {

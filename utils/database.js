@@ -72,7 +72,12 @@ async function addOrderHistory(userId, orderData) {
 async function getOrderHistory(userId) {
     const db = await getDb();
     const user = await db.collection(USERS_COLL).findOne({ _id: userId.toString() });
-    return user ? user.history : [];
+    const history = user && Array.isArray(user.history) ? user.history : [];
+    return history.sort((a, b) => {
+        const dateA = new Date(a?.tanggal || a?.updated_at || 0).getTime();
+        const dateB = new Date(b?.tanggal || b?.updated_at || 0).getTime();
+        return dateB - dateA; // Terbaru paling atas
+    });
 }
 
 async function updateOrderHistoryStatus(userId, orderId, status, extraData = {}) {
