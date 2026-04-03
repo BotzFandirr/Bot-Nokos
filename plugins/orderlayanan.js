@@ -8,6 +8,7 @@ require('moment/locale/id');
 // --- KONFIGURASI WAKTU ---
 const MIN_CANCEL_MINUTES = 3;  // Minimal 3 menit baru bisa batal
 const MAX_EXPIRE_MINUTES = 20; // Expired dalam 20 menit
+const REMINDER_BEFORE_EXPIRE_MINUTES = 5; // Kirim pengingat saat sisa 5 menit
 
 async function sendSafeReply(bot, chatId, text, options) {
     try {
@@ -82,6 +83,42 @@ async function processRefund(bot, db, userId, orderId, amount, reason, query) {
     });
 }
 
+function scheduleOrderExpiryReminder(bot, db, userId, chatId, orderId) {
+    const reminderDelayMs = (MAX_EXPIRE_MINUTES - REMINDER_BEFORE_EXPIRE_MINUTES) * 60 * 1000;
+
+    setTimeout(async () => {
+        try {
+            const ownerId = await db.getOrderOwner(orderId);
+            if (!ownerId || ownerId.toString() !== userId.toString()) return; // Sudah selesai / bukan aktif
+
+            const history = await db.getOrderHistory(userId);
+            const orderData = history.find(h => String(h.orderId) === String(orderId));
+            if (!orderData) return;
+
+            const status = String(orderData.status || '').toLowerCase();
+            if (status && status !== 'pending') return;
+
+            const reminderMsg = `⏰ *PENGINGAT ORDER*\n` +
+                `Order ID: \`${orderId}\`\n` +
+                `Status: ⏳ *PENDING*\n\n` +
+                `Sisa waktu sekitar *${REMINDER_BEFORE_EXPIRE_MINUTES} menit* sebelum order expired \\(total ${MAX_EXPIRE_MINUTES} menit\\)\\.\n` +
+                `Silakan cek OTP sekarang atau batalkan jika diperlukan\\.`;
+
+            await bot.sendMessage(chatId, reminderMsg, {
+                parse_mode: "MarkdownV2",
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: "📩 Cek OTP", callback_data: `ord_cekotp:${orderId}` },
+                        { text: "❌ Batalkan", callback_data: `ord_batal:${orderId}` }
+                    ]]
+                }
+            });
+        } catch (err) {
+            console.error(`[Reminder] Gagal kirim pengingat order ${orderId}:`, err.message);
+        }
+    }, reminderDelayMs);
+}
+
 // --- HANDLE TOMBOL CEK OTP / BATAL ---
 async function handleOrderCallback(bot, db, settings, query) {
     const data = query.data;
@@ -148,6 +185,7 @@ async function handleOrderCallback(bot, db, settings, query) {
             } else if (otp && otp !== '-' && (status === 'received' || status === 'completed')) {
                 // [FIX] JIKA SUKSES -> GANTI TOMBOL JADI MENU UTAMA
                 await db.updateOrderHistoryStatus(userId, orderId, 'success', { otp_code: otp });
+                await db.removeOrder(orderId);
                 await bot.answerCallbackQuery(query.id, { text: `OTP: ${otp}`, show_alert: true });
                 
                 const currentSaldo = await db.cekSaldo(userId);
@@ -314,6 +352,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             await db.kurangSaldo(userId, finalHarga);
             await db.saveOrder(order_id, userId);
             await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalHarga, tanggal: new Date().toISOString(), status: 'pending' });
+            scheduleOrderExpiryReminder(bot, db, userId, chatId, order_id);
 
             const newSaldo = await db.cekSaldo(userId);
             const successMsg = `✅ *ORDER BERHASIL*\n\n` +
