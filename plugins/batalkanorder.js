@@ -118,6 +118,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             }
 
             // Hapus order dari database aktif
+            await db.updateOrderHistoryStatus(userId, orderId, 'canceled', { refunded: true, cancel_reason: 'Canceled by User (/batalkanorder)' });
             await db.removeOrder(orderId);
 
             const successMsg = `*「 PEMBATALAN BERHASIL 」*\n\n` +
