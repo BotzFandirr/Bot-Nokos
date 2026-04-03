@@ -75,18 +75,13 @@ async function fetchAndCacheHistory(db, settings, userId) {
 
     history = await syncRecentStatuses(db, settings, userId, history);
 
-    // Sorting Terbaru diatas
-    history.sort((a, b) => {
-        const dateA = new Date(a.tanggal || a.created_at || 0);
-        const dateB = new Date(b.tanggal || b.created_at || 0);
-        return dateB - dateA; 
-    });
-
     // Formatting
     const allLines = history.map(order => {
         const serviceName = capitalize(order.layanan || 'Layanan');
         const hargaFormatted = (order.harga || 0).toLocaleString('id-ID');
-        const tgl = moment(order.tanggal).locale('id').format('DD MMM YYYY, HH:mm');
+        const tgl = order.tanggal
+            ? moment(order.tanggal).locale('id').format('DD MMM YYYY, HH:mm')
+            : '-';
         const statusFormatted = formatStatus(order.status);
 
         return `🆔 \`${order.orderId || order.id}\`\n` +
@@ -179,7 +174,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             if (data.startsWith('ri_page:')) {
                 const parts = data.split(':');
                 const targetUserId = parts[1];
-                const newPage = parseInt(parts[2]);
+                const newPage = parseInt(parts[2], 10);
 
                 if (userId.toString() !== targetUserId) {
                     return bot.answerCallbackQuery(query.id, { text: '❌ Akses Ditolak!', show_alert: true });

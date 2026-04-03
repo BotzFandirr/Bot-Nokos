@@ -9,6 +9,14 @@ const USERS_COLL = "users";
 const ORDERS_COLL = "orders";
 const PENDING_DEPOSITS_COLL = "pending_deposits";
 
+function sortOrderHistory(history = []) {
+    return [...history].sort((a, b) => {
+        const dateA = new Date(a?.tanggal || a?.updated_at || 0).getTime();
+        const dateB = new Date(b?.tanggal || b?.updated_at || 0).getTime();
+        return dateB - dateA; // Terbaru paling atas
+    });
+}
+
 async function getDb() {
     if (dbInstance) {
         return dbInstance;
@@ -73,15 +81,12 @@ async function getOrderHistory(userId) {
     const db = await getDb();
     const user = await db.collection(USERS_COLL).findOne({ _id: userId.toString() });
     const history = user && Array.isArray(user.history) ? user.history : [];
-    return history.sort((a, b) => {
-        const dateA = new Date(a?.tanggal || a?.updated_at || 0).getTime();
-        const dateB = new Date(b?.tanggal || b?.updated_at || 0).getTime();
-        return dateB - dateA; // Terbaru paling atas
-    });
+    return sortOrderHistory(history);
 }
 
 async function updateOrderHistoryStatus(userId, orderId, status, extraData = {}) {
     const db = await getDb();
+    const orderIdStr = String(orderId);
     await db.collection(USERS_COLL).updateOne(
         { _id: userId.toString() },
         {
@@ -94,7 +99,12 @@ async function updateOrderHistoryStatus(userId, orderId, status, extraData = {})
             }
         },
         {
-            arrayFilters: [{ "order.orderId": orderId }],
+            arrayFilters: [{
+                $or: [
+                    { "order.orderId": orderId },
+                    { "order.orderId": orderIdStr }
+                ]
+            }],
         }
     );
 }
