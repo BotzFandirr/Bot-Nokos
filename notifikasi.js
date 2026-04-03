@@ -107,6 +107,10 @@ async function orderCreated({
   user_id,
   number,
   harga_final,
+  layanan,
+  negara,
+  user_name,
+  username,
   notifyText = true
 }) {
   // Catat ke ledger
@@ -114,7 +118,11 @@ async function orderCreated({
     order_id,
     user_id,
     number,
-    harga_final
+    harga_final,
+    layanan: layanan || null,
+    negara: negara || null,
+    user_name: user_name || null,
+    username: username || null
   });
 
   if (notifyText && botInstance) {
@@ -130,6 +138,9 @@ async function orderCreated({
 `*🛒 Order Baru*
 • OrderID: \`${order_id}\`
 • UserID: \`${user_id}\`
+• Nama User: ${escMd(user_name || "-")} ${username ? `(@${escMd(username)})` : ""}
+• Layanan: *${escMd(layanan || "-")}*
+• Negara: *${escMd(negara || "-")}*
 • Nomor: \`${number}\`
 • Harga: *Rp${Number(harga_final || 0).toLocaleString('id-ID')}*
 • Waktu: \`${jamWIB} WIB\``;

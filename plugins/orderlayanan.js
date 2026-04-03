@@ -375,7 +375,18 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                 }
             });
 
-            try { await Notifikasi.orderCreated({ order_id, user_id: userId, number: phone_number, harga_final: finalHarga }); } catch {}
+            try {
+                await Notifikasi.orderCreated({
+                    order_id,
+                    user_id: userId,
+                    user_name: msg.from.first_name || "User",
+                    username: msg.from.username || "",
+                    number: phone_number,
+                    layanan: service,
+                    negara: country,
+                    harga_final: finalHarga
+                });
+            } catch {}
 
         } catch (error) {
             await bot.editMessageText(`❌ Gagal: ${error.message}`, { chat_id: chatId, message_id: waitMsg.message_id });

@@ -216,7 +216,7 @@ module.exports = (bot, db, settings) => {
                     
                     await db.kurangSaldo(userId, finalPrice);
                     await db.saveOrder(order_id, userId);
-                    await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalPrice, tanggal: new Date().toISOString() });
+                    await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalPrice, tanggal: new Date().toISOString(), status: 'pending' });
 
                     const sisaSaldo = await db.cekSaldo(userId);
                     
@@ -242,7 +242,18 @@ module.exports = (bot, db, settings) => {
                         });
                     }
 
-                    try { await Notifikasi.orderCreated({ order_id, user_id: userId, number: phone_number, harga_final: finalPrice }); } catch {}
+                    try {
+                        await Notifikasi.orderCreated({
+                            order_id,
+                            user_id: userId,
+                            user_name: query.from.first_name || "User",
+                            username: query.from.username || "",
+                            number: phone_number,
+                            layanan: service,
+                            negara: country,
+                            harga_final: finalPrice
+                        });
+                    } catch {}
                 }
 
             } catch (err) {
