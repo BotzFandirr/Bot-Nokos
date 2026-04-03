@@ -59,6 +59,8 @@ async function processRefund(bot, db, userId, orderId, amount, reason, query) {
     await db.tambahSaldo(userId, amount);
     // 2. Hapus Order Aktif
     await db.removeOrder(orderId);
+    // 3. Update Riwayat Lokal
+    await db.updateOrderHistoryStatus(userId, orderId, 'canceled', { refunded: true, cancel_reason: reason });
     
     const saldoBaru = await db.cekSaldo(userId);
 
@@ -145,6 +147,7 @@ async function handleOrderCallback(bot, db, settings, query) {
             
             } else if (otp && otp !== '-' && (status === 'received' || status === 'completed')) {
                 // [FIX] JIKA SUKSES -> GANTI TOMBOL JADI MENU UTAMA
+                await db.updateOrderHistoryStatus(userId, orderId, 'success', { otp_code: otp });
                 await bot.answerCallbackQuery(query.id, { text: `OTP: ${otp}`, show_alert: true });
                 
                 const currentSaldo = await db.cekSaldo(userId);
@@ -167,6 +170,7 @@ async function handleOrderCallback(bot, db, settings, query) {
                 });
             
             } else {
+                 await db.updateOrderHistoryStatus(userId, orderId, 'pending');
                  // [FIX] JIKA WAITING -> TOMBOL TETAP TERKUNCI
                  const sisaMenit = Math.max(0, MAX_EXPIRE_MINUTES - durationMinutes);
                  const sisaDetik = Math.floor((sisaMenit * 60) % 60);
@@ -309,7 +313,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
             await db.kurangSaldo(userId, finalHarga);
             await db.saveOrder(order_id, userId);
-            await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalHarga, tanggal: new Date().toISOString() });
+            await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalHarga, tanggal: new Date().toISOString(), status: 'pending' });
 
             const newSaldo = await db.cekSaldo(userId);
             const successMsg = `✅ *ORDER BERHASIL*\n\n` +

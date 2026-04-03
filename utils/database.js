@@ -62,12 +62,7 @@ async function addOrderHistory(userId, orderData) {
     await db.collection(USERS_COLL).updateOne(
         { _id: userId.toString() },
         { 
-            $push: { 
-                history: { 
-                    $each: [orderData], 
-                    $slice: -25 
-                }
-            },
+            $push: { history: orderData },
             $setOnInsert: { saldo: 0, deposit_history: [] }
         },
         { upsert: true }
@@ -78,6 +73,25 @@ async function getOrderHistory(userId) {
     const db = await getDb();
     const user = await db.collection(USERS_COLL).findOne({ _id: userId.toString() });
     return user ? user.history : [];
+}
+
+async function updateOrderHistoryStatus(userId, orderId, status, extraData = {}) {
+    const db = await getDb();
+    await db.collection(USERS_COLL).updateOne(
+        { _id: userId.toString() },
+        {
+            $set: {
+                "history.$[order].status": status,
+                "history.$[order].updated_at": new Date().toISOString(),
+                ...Object.fromEntries(
+                    Object.entries(extraData).map(([key, value]) => [`history.$[order].${key}`, value])
+                )
+            }
+        },
+        {
+            arrayFilters: [{ "order.orderId": orderId }],
+        }
+    );
 }
 
 async function addDepositHistory(userId, depositData) {
@@ -169,6 +183,7 @@ module.exports = {
     kurangSaldo,
     addOrderHistory,
     getOrderHistory,
+    updateOrderHistoryStatus,
     addDepositHistory,
     countDeposits,
     readUserDB, 

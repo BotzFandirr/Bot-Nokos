@@ -88,6 +88,18 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             const orderData = data.data;
             const otp = orderData.otp_code;
             const status = orderData.status; // status: waiting, received, completed, canceled, expiring
+            const ownerId = await db.getOrderOwner(orderId);
+            const normalizedStatus = String(status || '').toLowerCase();
+
+            if (ownerId) {
+                if (normalizedStatus === 'canceled' || normalizedStatus === 'expired' || normalizedStatus === 'expiring') {
+                    await db.updateOrderHistoryStatus(ownerId, orderId, 'canceled', { refunded: true, cancel_reason: 'Canceled/Expired from /cekotp check' });
+                } else if ((otp && otp !== '-') && (normalizedStatus === 'received' || normalizedStatus === 'completed')) {
+                    await db.updateOrderHistoryStatus(ownerId, orderId, 'success', { otp_code: otp });
+                } else {
+                    await db.updateOrderHistoryStatus(ownerId, orderId, 'pending');
+                }
+            }
 
             let message = "";
 
