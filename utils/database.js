@@ -62,12 +62,7 @@ async function addOrderHistory(userId, orderData) {
     await db.collection(USERS_COLL).updateOne(
         { _id: userId.toString() },
         { 
-            $push: { 
-                history: { 
-                    $each: [orderData], 
-                    $slice: -25 
-                }
-            },
+            $push: { history: orderData },
             $setOnInsert: { saldo: 0, deposit_history: [] }
         },
         { upsert: true }
@@ -77,7 +72,31 @@ async function addOrderHistory(userId, orderData) {
 async function getOrderHistory(userId) {
     const db = await getDb();
     const user = await db.collection(USERS_COLL).findOne({ _id: userId.toString() });
-    return user ? user.history : [];
+    const history = user && Array.isArray(user.history) ? user.history : [];
+    return history.sort((a, b) => {
+        const dateA = new Date(a?.tanggal || a?.updated_at || 0).getTime();
+        const dateB = new Date(b?.tanggal || b?.updated_at || 0).getTime();
+        return dateB - dateA; // Terbaru paling atas
+    });
+}
+
+async function updateOrderHistoryStatus(userId, orderId, status, extraData = {}) {
+    const db = await getDb();
+    await db.collection(USERS_COLL).updateOne(
+        { _id: userId.toString() },
+        {
+            $set: {
+                "history.$[order].status": status,
+                "history.$[order].updated_at": new Date().toISOString(),
+                ...Object.fromEntries(
+                    Object.entries(extraData).map(([key, value]) => [`history.$[order].${key}`, value])
+                )
+            }
+        },
+        {
+            arrayFilters: [{ "order.orderId": orderId }],
+        }
+    );
 }
 
 async function addDepositHistory(userId, depositData) {
@@ -169,6 +188,7 @@ module.exports = {
     kurangSaldo,
     addOrderHistory,
     getOrderHistory,
+    updateOrderHistoryStatus,
     addDepositHistory,
     countDeposits,
     readUserDB, 

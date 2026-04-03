@@ -187,6 +187,7 @@ const prefixMap = [
   { prefix: 'close_neg', plugin: 'ceknegara' },
   { prefix: 'ri_page:', plugin: 'riwayatorder' },
   { prefix: 'ri_close:', plugin: 'riwayatorder' },
+  { prefix: 'top_page:', plugin: 'topuser' },
   { prefix: 'ord_cekotp:', plugin: 'orderlayanan' },
   { prefix: 'ord_batal:', plugin: 'orderlayanan' },
   { prefix: 'cancel_deposit:', plugin: 'deposit' },

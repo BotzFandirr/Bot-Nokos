@@ -60,7 +60,7 @@ No OTP after 3 mins? Click *❌ Cancel*. 100% instant refund.
 // --- HELPER FETCH ---
 async function fetchServices(settings) {
     const instance = axios.create({ timeout: 10000 });
-    const apiUrl = `https://www.rumahotp.com/api/v2/services`;
+    const apiUrl = `https://www.rumahotp.io/api/v2/services`;
     const response = await instance.get(apiUrl, { 
         headers: { 'x-apikey': settings.rumahOtpApiKey, 'Accept': 'application/json' }
     });

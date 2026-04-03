@@ -8,6 +8,7 @@ require('moment/locale/id');
 // --- KONFIGURASI WAKTU ---
 const MIN_CANCEL_MINUTES = 3;  // Minimal 3 menit baru bisa batal
 const MAX_EXPIRE_MINUTES = 20; // Expired dalam 20 menit
+const REMINDER_BEFORE_EXPIRE_MINUTES = 5; // Kirim pengingat saat sisa 5 menit
 
 async function sendSafeReply(bot, chatId, text, options) {
     try {
@@ -54,11 +55,13 @@ async function smartEdit(bot, query, text, options) {
 }
 
 // --- FUNGSI REFUND (PENGEMBALIAN DANA) ---
-async function processRefund(bot, db, userId, orderId, amount, reason, query) {
+async function processRefund(bot, db, userId, orderId, amount, reason, query, finalStatus = 'canceled') {
     // 1. Kembalikan Saldo
     await db.tambahSaldo(userId, amount);
     // 2. Hapus Order Aktif
     await db.removeOrder(orderId);
+    // 3. Update Riwayat Lokal
+    await db.updateOrderHistoryStatus(userId, orderId, finalStatus, { refunded: true, cancel_reason: reason });
     
     const saldoBaru = await db.cekSaldo(userId);
 
@@ -78,6 +81,42 @@ async function processRefund(bot, db, userId, orderId, amount, reason, query) {
             inline_keyboard: [[ { text: "🏠 Menu Utama", callback_data: "start" } ]]
         }
     });
+}
+
+function scheduleOrderExpiryReminder(bot, db, userId, chatId, orderId) {
+    const reminderDelayMs = (MAX_EXPIRE_MINUTES - REMINDER_BEFORE_EXPIRE_MINUTES) * 60 * 1000;
+
+    setTimeout(async () => {
+        try {
+            const ownerId = await db.getOrderOwner(orderId);
+            if (!ownerId || ownerId.toString() !== userId.toString()) return; // Sudah selesai / bukan aktif
+
+            const history = await db.getOrderHistory(userId);
+            const orderData = history.find(h => String(h.orderId) === String(orderId));
+            if (!orderData) return;
+
+            const status = String(orderData.status || '').toLowerCase();
+            if (status && status !== 'pending') return;
+
+            const reminderMsg = `⏰ *PENGINGAT ORDER*\n` +
+                `Order ID: \`${orderId}\`\n` +
+                `Status: ⏳ *PENDING*\n\n` +
+                `Sisa waktu sekitar *${REMINDER_BEFORE_EXPIRE_MINUTES} menit* sebelum order expired \\(total ${MAX_EXPIRE_MINUTES} menit\\)\\.\n` +
+                `Silakan cek OTP sekarang atau batalkan jika diperlukan\\.`;
+
+            await bot.sendMessage(chatId, reminderMsg, {
+                parse_mode: "MarkdownV2",
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: "📩 Cek OTP", callback_data: `ord_cekotp:${orderId}` },
+                        { text: "❌ Batalkan", callback_data: `ord_batal:${orderId}` }
+                    ]]
+                }
+            });
+        } catch (err) {
+            console.error(`[Reminder] Gagal kirim pengingat order ${orderId}:`, err.message);
+        }
+    }, reminderDelayMs);
 }
 
 // --- HANDLE TOMBOL CEK OTP / BATAL ---
@@ -114,17 +153,17 @@ async function handleOrderCallback(bot, db, settings, query) {
             if (durationMinutes >= MAX_EXPIRE_MINUTES) {
                 await bot.answerCallbackQuery(query.id, { text: "⏳ Waktu habis, memproses refund...", show_alert: true });
                 try {
-                    await axios.get(`https://www.rumahotp.com/api/v1/orders/set_status`, {
+                    await axios.get(`https://www.rumahotp.io/api/v1/orders/set_status`, {
                         params: { order_id: orderId, status: 'cancel' },
                         headers: getHeaders()
                     });
                 } catch (err) {}
-                await processRefund(bot, db, userId, orderId, orderData.harga, "Waktu Habis (Expired)", query);
+                await processRefund(bot, db, userId, orderId, orderData.harga, "Waktu Habis (Expired)", query, 'expired');
                 return; 
             }
 
             // B. CEK STATUS KE API
-            const res = await axios.get(`https://www.rumahotp.com/api/v1/orders/get_status`, {
+            const res = await axios.get(`https://www.rumahotp.io/api/v1/orders/get_status`, {
                 params: { order_id: orderId },
                 headers: getHeaders()
             });
@@ -140,11 +179,13 @@ async function handleOrderCallback(bot, db, settings, query) {
             if (status === 'canceled' || status === 'expired') {
                 // JIKA BATAL/EXPIRED -> REFUND
                 await bot.answerCallbackQuery(query.id, { text: "❌ Order dibatalkan server, memproses refund...", show_alert: true });
-                await processRefund(bot, db, userId, orderId, orderData.harga, "Dibatalkan Server/Expired", query);
+                await processRefund(bot, db, userId, orderId, orderData.harga, "Dibatalkan Server/Expired", query, 'expired');
                 return;
             
             } else if (otp && otp !== '-' && (status === 'received' || status === 'completed')) {
                 // [FIX] JIKA SUKSES -> GANTI TOMBOL JADI MENU UTAMA
+                await db.updateOrderHistoryStatus(userId, orderId, 'success', { otp_code: otp });
+                await db.removeOrder(orderId);
                 await bot.answerCallbackQuery(query.id, { text: `OTP: ${otp}`, show_alert: true });
                 
                 const currentSaldo = await db.cekSaldo(userId);
@@ -167,6 +208,7 @@ async function handleOrderCallback(bot, db, settings, query) {
                 });
             
             } else {
+                 await db.updateOrderHistoryStatus(userId, orderId, 'pending');
                  // [FIX] JIKA WAITING -> TOMBOL TETAP TERKUNCI
                  const sisaMenit = Math.max(0, MAX_EXPIRE_MINUTES - durationMinutes);
                  const sisaDetik = Math.floor((sisaMenit * 60) % 60);
@@ -219,7 +261,7 @@ async function handleOrderCallback(bot, db, settings, query) {
             }
             await bot.answerCallbackQuery(query.id, { text: "⏳ Membatalkan pesanan..." });
             
-            const cancelRes = await axios.get(`https://www.rumahotp.com/api/v1/orders/set_status`, {
+            const cancelRes = await axios.get(`https://www.rumahotp.io/api/v1/orders/set_status`, {
                 params: { order_id: orderId, status: 'cancel' },
                 headers: getHeaders()
             });
@@ -230,7 +272,7 @@ async function handleOrderCallback(bot, db, settings, query) {
                  return bot.answerCallbackQuery(query.id, { text: `❌ Gagal: ${errMsg}`, show_alert: true });
             }
 
-            await processRefund(bot, db, userId, orderId, orderData.harga, "Canceled by User", query);
+            await processRefund(bot, db, userId, orderId, orderData.harga, "Canceled by User", query, 'canceled');
         }
     } catch (e) {
         console.error("Callback Error:", e);
@@ -287,7 +329,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         if (!waitMsg) return;
 
         try {
-            const countryRes = await axios.get(`https://www.rumahotp.com/api/v2/countries`, { params: { service_id: serviceId }, headers: getHeaders() });
+            const countryRes = await axios.get(`https://www.rumahotp.io/api/v2/countries`, { params: { service_id: serviceId }, headers: getHeaders() });
             if (!countryRes.data.success || !countryRes.data.data) throw new Error("API Error / Data Kosong");
 
             const targetCountry = countryRes.data.data.find(c => c.iso_code.toLowerCase() === countryInput || c.name.toLowerCase() === countryInput);
@@ -299,7 +341,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
             if (userSaldo < finalHarga) throw new Error(`Saldo kurang. Butuh Rp${finalHarga.toLocaleString()}`);
 
-            const orderRes = await axios.get(`https://www.rumahotp.com/api/v2/orders`, {
+            const orderRes = await axios.get(`https://www.rumahotp.io/api/v2/orders`, {
                 params: { number_id: targetCountry.number_id, provider_id: providerData.provider_id, operator_id: operatorId },
                 headers: getHeaders()
             });
@@ -309,7 +351,8 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
             await db.kurangSaldo(userId, finalHarga);
             await db.saveOrder(order_id, userId);
-            await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalHarga, tanggal: new Date().toISOString() });
+            await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalHarga, tanggal: new Date().toISOString(), status: 'pending' });
+            scheduleOrderExpiryReminder(bot, db, userId, chatId, order_id);
 
             const newSaldo = await db.cekSaldo(userId);
             const successMsg = `✅ *ORDER BERHASIL*\n\n` +
@@ -332,7 +375,18 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                 }
             });
 
-            try { await Notifikasi.orderCreated({ order_id, user_id: userId, number: phone_number, harga_final: finalHarga }); } catch {}
+            try {
+                await Notifikasi.orderCreated({
+                    order_id,
+                    user_id: userId,
+                    user_name: msg.from.first_name || "User",
+                    username: msg.from.username || "",
+                    number: phone_number,
+                    layanan: service,
+                    negara: country,
+                    harga_final: finalHarga
+                });
+            } catch {}
 
         } catch (error) {
             await bot.editMessageText(`❌ Gagal: ${error.message}`, { chat_id: chatId, message_id: waitMsg.message_id });

@@ -26,7 +26,7 @@ function getFinalPrice(originalHarga, markupRateString) {
 async function fetchCountryData(serviceId, apiKey) {
     if (!apiKey) throw new Error("API Key belum disetting!");
     try {
-        const response = await axios.get(`https://www.rumahotp.com/api/v2/countries`, {
+        const response = await axios.get(`https://www.rumahotp.io/api/v2/countries`, {
             params: { service_id: serviceId },
             headers: { 'x-apikey': apiKey, 'Accept': 'application/json' },
             timeout: 15000 
@@ -201,7 +201,7 @@ module.exports = (bot, db, settings) => {
                     await bot.answerCallbackQuery(query.id, { text: "⏳ Processing order..." });
 
                     // -- API ORDER --
-                    const orderRes = await axios.get(`https://www.rumahotp.com/api/v2/orders`, {
+                    const orderRes = await axios.get(`https://www.rumahotp.io/api/v2/orders`, {
                         params: { 
                             number_id: countryData.number_id, 
                             provider_id: providerData.provider_id, // Gunakan ID Provider termurah
@@ -216,7 +216,7 @@ module.exports = (bot, db, settings) => {
                     
                     await db.kurangSaldo(userId, finalPrice);
                     await db.saveOrder(order_id, userId);
-                    await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalPrice, tanggal: new Date().toISOString() });
+                    await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalPrice, tanggal: new Date().toISOString(), status: 'pending' });
 
                     const sisaSaldo = await db.cekSaldo(userId);
                     
@@ -242,7 +242,18 @@ module.exports = (bot, db, settings) => {
                         });
                     }
 
-                    try { await Notifikasi.orderCreated({ order_id, user_id: userId, number: phone_number, harga_final: finalPrice }); } catch {}
+                    try {
+                        await Notifikasi.orderCreated({
+                            order_id,
+                            user_id: userId,
+                            user_name: query.from.first_name || "User",
+                            username: query.from.username || "",
+                            number: phone_number,
+                            layanan: service,
+                            negara: country,
+                            harga_final: finalPrice
+                        });
+                    } catch {}
                 }
 
             } catch (err) {
