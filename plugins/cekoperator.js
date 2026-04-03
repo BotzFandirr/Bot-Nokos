@@ -80,7 +80,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             });
         }
 
-        const apiUrl = `https://www.rumahotp.com/api/v2/operators`;
+        const apiUrl = `https://www.rumahotp.io/api/v2/operators`;
         
         const waitMsg = await sendSafeReply(bot, chatId, `⏳ Mengambil daftar operator untuk *${countryName}* (ID: ${providerId})...`, {
             reply_to_message_id: msgId,
