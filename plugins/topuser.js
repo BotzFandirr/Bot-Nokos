@@ -86,11 +86,13 @@ async function renderTopPage(bot, sortedUsers, page = 1) {
 
     const buttons = [];
     if (safePage > 1) {
+        buttons.push({ text: "⏮️ Pertama", callback_data: "top_page:first" });
         buttons.push({ text: "⬅️ Sebelumnya", callback_data: `top_page:${safePage - 1}` });
     }
     buttons.push({ text: "🏠 Menu Utama", callback_data: "start" });
     if (safePage < totalPages) {
         buttons.push({ text: "Selanjutnya ➡️", callback_data: `top_page:${safePage + 1}` });
+        buttons.push({ text: "Terakhir ⏭️", callback_data: "top_page:last" });
     }
 
     return {
@@ -121,7 +123,13 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                     topCache[chatId] = sortedUsers;
                 }
 
-                const page = data.startsWith('top_page:') ? parseInt(data.split(':')[1], 10) : 1;
+                let page = 1;
+                if (data.startsWith('top_page:')) {
+                    const requested = data.split(':')[1];
+                    if (requested === 'first') page = 1;
+                    else if (requested === 'last') page = Math.max(1, Math.ceil(sortedUsers.length / ITEMS_PER_PAGE));
+                    else page = parseInt(requested, 10) || 1;
+                }
                 const pageData = await renderTopPage(bot, sortedUsers, page);
 
                 await bot.editMessageCaption(pageData.text, {
