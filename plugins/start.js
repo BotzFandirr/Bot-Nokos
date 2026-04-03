@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const Notifikasi = require('../notifikasi');
 const axios = require('axios');
+let membershipConfigWarned = false;
 
 // Helper: Escape Markdown
 function escapeMd(text = "") {
@@ -59,13 +60,30 @@ async function sendSafeReply(bot, chatId, text, options = {}) {
 
 // ===== TAMBAHAN: CEK USER SUDAH JOIN CHANNEL WAJIB =====
 async function isUserJoinedRequiredChannel(bot, userId, settings) {
+  const configuredChannel = settings.requiredChannel ?? settings.channelid ?? -1003892199273;
+  const normalizedChannel =
+    typeof configuredChannel === "string" && /^-?\d+$/.test(configuredChannel)
+      ? Number(configuredChannel)
+      : configuredChannel;
+
   try {
-    const requiredChannel = settings.requiredChannel || -1003892199273;
-    const member = await bot.getChatMember(requiredChannel, userId);
+    const member = await bot.getChatMember(normalizedChannel, userId);
     const allowedStatus = ["member", "administrator", "creator"];
     return allowedStatus.includes(member.status);
   } catch (error) {
-    console.error("Gagal cek membership channel:", error?.response?.body || error);
+    const errBody = error?.response?.body || error;
+    const errDesc = String(error?.response?.body?.description || "").toLowerCase();
+
+    if (errDesc.includes("chat not found") && !membershipConfigWarned) {
+      membershipConfigWarned = true;
+      console.error(
+        `[JoinCheck] Channel tidak ditemukan. Pastikan ID/username channel benar dan bot sudah masuk channel.\n` +
+        `[JoinCheck] Value saat ini: ${JSON.stringify(configuredChannel)}`
+      );
+    } else {
+      console.error("Gagal cek membership channel:", errBody);
+    }
+
     return false;
   }
 }
