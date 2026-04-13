@@ -203,6 +203,39 @@ async function removePendingDeposit(userId) {
     await db.collection(PENDING_DEPOSITS_COLL).deleteOne({ _id: userId.toString() });
 }
 
+async function markOrderAsRefundedOnce(userId, orderId, status = 'canceled', extraData = {}) {
+    const db = await getDb();
+    const targetOrderId = orderId.toString();
+    const updatePayload = {
+        "history.$[order].status": status,
+        "history.$[order].refunded": true,
+        "history.$[order].updated_at": new Date().toISOString(),
+        ...Object.fromEntries(
+            Object.entries(extraData).map(([key, value]) => [`history.$[order].${key}`, value])
+        )
+    };
+
+    const result = await db.collection(USERS_COLL).updateOne(
+        {
+            _id: userId.toString(),
+            history: {
+                $elemMatch: {
+                    orderId: targetOrderId,
+                    refunded: { $ne: true }
+                }
+            }
+        },
+        {
+            $set: updatePayload
+        },
+        {
+            arrayFilters: [{ "order.orderId": targetOrderId }]
+        }
+    );
+
+    return result.modifiedCount > 0;
+}
+
 module.exports = {
     getDb,
     countTotalUsers,
@@ -214,6 +247,7 @@ module.exports = {
     addOrderHistory,
     getOrderHistory,
     updateOrderHistoryStatus,
+    markOrderAsRefundedOnce,
     addDepositHistory,
     countDeposits,
     readUserDB, 

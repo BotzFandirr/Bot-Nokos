@@ -93,9 +93,9 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
             if (ownerId) {
                 if (normalizedStatus === 'expired' || normalizedStatus === 'expiring') {
-                    await db.updateOrderHistoryStatus(ownerId, orderId, 'expired', { refunded: true, cancel_reason: 'Expired from /cekotp check' });
+                    await db.updateOrderHistoryStatus(ownerId, orderId, 'expired', { cancel_reason: 'Expired from /cekotp check' });
                 } else if (normalizedStatus === 'canceled') {
-                    await db.updateOrderHistoryStatus(ownerId, orderId, 'canceled', { refunded: true, cancel_reason: 'Canceled from /cekotp check' });
+                    await db.updateOrderHistoryStatus(ownerId, orderId, 'canceled', { cancel_reason: 'Canceled from /cekotp check' });
                 } else if ((otp && otp !== '-') && (normalizedStatus === 'received' || normalizedStatus === 'completed')) {
                     await db.updateOrderHistoryStatus(ownerId, orderId, 'success', { otp_code: otp });
                 } else {

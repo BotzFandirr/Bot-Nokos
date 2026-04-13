@@ -108,7 +108,13 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             let refundMsg = "";
             let newSaldo = 0;
 
-            if (refundAmountToUser > 0) {
+            const refundGranted = await db.markOrderAsRefundedOnce(userId, orderId, 'canceled', {
+                cancel_reason: 'Canceled by User (/batalkanorder)'
+            });
+
+            if (!refundGranted) {
+                refundMsg = "ℹ️ Order ini sudah pernah direfund sebelumnya, saldo tidak ditambahkan lagi.";
+            } else if (refundAmountToUser > 0) {
                 await db.tambahSaldo(userId, refundAmountToUser);
                 newSaldo = await db.cekSaldo(userId);
                 refundMsg = `✅ Saldo *Rp${refundAmountToUser.toLocaleString('id-ID')}* telah dikembalikan.\n💰 Saldo Anda: *Rp${newSaldo.toLocaleString('id-ID')}*`;
@@ -118,7 +124,6 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             }
 
             // Hapus order dari database aktif
-            await db.updateOrderHistoryStatus(userId, orderId, 'canceled', { refunded: true, cancel_reason: 'Canceled by User (/batalkanorder)' });
             await db.removeOrder(orderId);
 
             const successMsg = `*「 PEMBATALAN BERHASIL 」*\n\n` +
