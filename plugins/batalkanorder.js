@@ -86,7 +86,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             const refundAmountToUser = localOrderData ? localOrderData.harga : 0;
 
             // C. Request Batal ke API RumahOTP (set_status)
-            const apiUrl = `https://www.rumahotp.com/api/v1/orders/set_status`;
+            const apiUrl = `https://www.rumahotp.io/api/v1/orders/set_status`;
             const response = await axios.get(apiUrl, {
                 params: {
                     order_id: orderId,
@@ -107,19 +107,24 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             
             let refundMsg = "";
             let newSaldo = 0;
+            const orderLock = await db.removeOrder(orderId);
 
-            if (refundAmountToUser > 0) {
+            if (!orderLock) {
+                refundMsg = "ℹ️ Order ini sudah diproses sebelumnya, saldo tidak ditambahkan lagi.";
+            } else if (refundAmountToUser > 0) {
+                await db.markOrderAsRefundedOnce(userId, orderId, 'canceled', {
+                    cancel_reason: 'Canceled by User (/batalkanorder)'
+                });
                 await db.tambahSaldo(userId, refundAmountToUser);
                 newSaldo = await db.cekSaldo(userId);
                 refundMsg = `✅ Saldo *Rp${refundAmountToUser.toLocaleString('id-ID')}* telah dikembalikan.\n💰 Saldo Anda: *Rp${newSaldo.toLocaleString('id-ID')}*`;
             } else {
+                await db.markOrderAsRefundedOnce(userId, orderId, 'canceled', {
+                    cancel_reason: 'Canceled by User (/batalkanorder)'
+                });
                 // Fallback jika data history lokal korup/hilang
                 refundMsg = "Pesanan dibatalkan di API, namun data harga lokal tidak ditemukan. Hubungi admin jika saldo belum kembali.";
             }
-
-            // Hapus order dari database aktif
-            await db.updateOrderHistoryStatus(userId, orderId, 'canceled', { refunded: true, cancel_reason: 'Canceled by User (/batalkanorder)' });
-            await db.removeOrder(orderId);
 
             const successMsg = `*「 PEMBATALAN BERHASIL 」*\n\n` +
                 `- *Order ID:* \`${orderId}\`\n` +

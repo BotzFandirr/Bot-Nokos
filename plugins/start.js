@@ -201,7 +201,7 @@ async function showMainMenu(bot, db, settings, chatId, userId, userNameRaw, mess
     let saldoPanelStr = "Rp0"; 
     try {
         // [DOC] Endpoint V1: user/balance
-        const apiUrl = `https://www.rumahotp.com/api/v1/user/balance`;
+        const apiUrl = `https://www.rumahotp.io/api/v1/user/balance`;
         const res = await axios.get(apiUrl, { 
             headers: { 
                 'x-apikey': settings.rumahOtpApiKey,
