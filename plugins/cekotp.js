@@ -71,7 +71,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         if (!waitMsg) return;
 
         try {
-            const apiUrl = `https://www.rumahotp.com/api/v1/orders/get_status`;
+            const apiUrl = `https://www.rumahotp.io/api/v1/orders/get_status`;
             
             // Request ke API RumahOTP
             const response = await axios.get(apiUrl, {

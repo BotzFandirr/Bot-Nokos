@@ -174,7 +174,7 @@ async function handleOrderCallback(bot, db, settings, query) {
             if (durationMinutes >= MAX_EXPIRE_MINUTES) {
                 await bot.answerCallbackQuery(query.id, { text: "⏳ Waktu habis, memproses refund...", show_alert: true });
                 try {
-                    await axios.get(`https://www.rumahotp.com/api/v1/orders/set_status`, {
+                    await axios.get(`https://www.rumahotp.io/api/v1/orders/set_status`, {
                         params: { order_id: orderId, status: 'cancel' },
                         headers: getHeaders()
                     });
@@ -184,7 +184,7 @@ async function handleOrderCallback(bot, db, settings, query) {
             }
 
             // B. CEK STATUS KE API
-            const res = await axios.get(`https://www.rumahotp.com/api/v1/orders/get_status`, {
+            const res = await axios.get(`https://www.rumahotp.io/api/v1/orders/get_status`, {
                 params: { order_id: orderId },
                 headers: getHeaders()
             });
@@ -282,7 +282,7 @@ async function handleOrderCallback(bot, db, settings, query) {
             }
             await bot.answerCallbackQuery(query.id, { text: "⏳ Membatalkan pesanan..." });
             
-            const cancelRes = await axios.get(`https://www.rumahotp.com/api/v1/orders/set_status`, {
+            const cancelRes = await axios.get(`https://www.rumahotp.io/api/v1/orders/set_status`, {
                 params: { order_id: orderId, status: 'cancel' },
                 headers: getHeaders()
             });
@@ -350,7 +350,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         if (!waitMsg) return;
 
         try {
-            const countryRes = await axios.get(`https://www.rumahotp.com/api/v2/countries`, { params: { service_id: serviceId }, headers: getHeaders() });
+            const countryRes = await axios.get(`https://www.rumahotp.io/api/v2/countries`, { params: { service_id: serviceId }, headers: getHeaders() });
             if (!countryRes.data.success || !countryRes.data.data) throw new Error("API Error / Data Kosong");
 
             const targetCountry = countryRes.data.data.find(c => c.iso_code.toLowerCase() === countryInput || c.name.toLowerCase() === countryInput);
@@ -362,7 +362,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
             if (userSaldo < finalHarga) throw new Error(`Saldo kurang. Butuh Rp${finalHarga.toLocaleString()}`);
 
-            const orderRes = await axios.get(`https://www.rumahotp.com/api/v2/orders`, {
+            const orderRes = await axios.get(`https://www.rumahotp.io/api/v2/orders`, {
                 params: { number_id: targetCountry.number_id, provider_id: providerData.provider_id, operator_id: operatorId },
                 headers: getHeaders()
             });

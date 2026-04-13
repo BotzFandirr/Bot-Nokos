@@ -86,7 +86,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             const refundAmountToUser = localOrderData ? localOrderData.harga : 0;
 
             // C. Request Batal ke API RumahOTP (set_status)
-            const apiUrl = `https://www.rumahotp.com/api/v1/orders/set_status`;
+            const apiUrl = `https://www.rumahotp.io/api/v1/orders/set_status`;
             const response = await axios.get(apiUrl, {
                 params: {
                     order_id: orderId,

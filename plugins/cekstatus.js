@@ -174,7 +174,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
       let sourceInfo = "Database Lokal";
 
       try {
-        const res = await axios.get("https://www.rumahotp.com/api/v1/orders/get_status", {
+        const res = await axios.get("https://www.rumahotp.io/api/v1/orders/get_status", {
           params: { order_id: orderId },
           headers: { "x-apikey": settings.rumahOtpApiKey, Accept: "application/json" },
           timeout: 10000,

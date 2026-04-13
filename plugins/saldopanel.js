@@ -32,7 +32,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
       const messageId = query.message.message_id;
 
       try {
-        const apiUrl = `https://www.rumahotp.com/api/v1/user/balance`;
+        const apiUrl = `https://www.rumahotp.io/api/v1/user/balance`;
         
         // PANGGIL API DENGAN HEADER
         const res = await axios.get(apiUrl, { headers: getHeaders() });
@@ -80,7 +80,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
     if (!waitMsg) return;
 
     try {
-      const apiUrl = `https://www.rumahotp.com/api/v1/user/balance`;
+      const apiUrl = `https://www.rumahotp.io/api/v1/user/balance`;
       
       // PANGGIL API DENGAN HEADER
       const res = await axios.get(apiUrl, { headers: getHeaders() });
