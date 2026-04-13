@@ -107,24 +107,24 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             
             let refundMsg = "";
             let newSaldo = 0;
+            const orderLock = await db.removeOrder(orderId);
 
-            const refundGranted = await db.markOrderAsRefundedOnce(userId, orderId, 'canceled', {
-                cancel_reason: 'Canceled by User (/batalkanorder)'
-            });
-
-            if (!refundGranted) {
-                refundMsg = "ℹ️ Order ini sudah pernah direfund sebelumnya, saldo tidak ditambahkan lagi.";
+            if (!orderLock) {
+                refundMsg = "ℹ️ Order ini sudah diproses sebelumnya, saldo tidak ditambahkan lagi.";
             } else if (refundAmountToUser > 0) {
+                await db.markOrderAsRefundedOnce(userId, orderId, 'canceled', {
+                    cancel_reason: 'Canceled by User (/batalkanorder)'
+                });
                 await db.tambahSaldo(userId, refundAmountToUser);
                 newSaldo = await db.cekSaldo(userId);
                 refundMsg = `✅ Saldo *Rp${refundAmountToUser.toLocaleString('id-ID')}* telah dikembalikan.\n💰 Saldo Anda: *Rp${newSaldo.toLocaleString('id-ID')}*`;
             } else {
+                await db.markOrderAsRefundedOnce(userId, orderId, 'canceled', {
+                    cancel_reason: 'Canceled by User (/batalkanorder)'
+                });
                 // Fallback jika data history lokal korup/hilang
                 refundMsg = "Pesanan dibatalkan di API, namun data harga lokal tidak ditemukan. Hubungi admin jika saldo belum kembali.";
             }
-
-            // Hapus order dari database aktif
-            await db.removeOrder(orderId);
 
             const successMsg = `*「 PEMBATALAN BERHASIL 」*\n\n` +
                 `- *Order ID:* \`${orderId}\`\n` +

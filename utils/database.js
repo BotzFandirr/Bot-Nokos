@@ -181,7 +181,8 @@ async function getOrderOwner(orderId) {
 
 async function removeOrder(orderId) {
     const db = await getDb();
-    await db.collection(ORDERS_COLL).deleteOne({ _id: orderId.toString() });
+    const result = await db.collection(ORDERS_COLL).deleteOne({ _id: orderId.toString() });
+    return result.deletedCount > 0;
 }
 
 async function getAllPendingDeposits() {
