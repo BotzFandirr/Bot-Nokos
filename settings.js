@@ -2,11 +2,11 @@ module.exports = {
     // --- Pengaturan Bot Telegram ---
     ownerId: "8017971635",
     channelid: "-1003892199273",
-    telegramToken: "YOUR_TOKEN",
+    telegramToken: "8297025226:AAHayQpFjEeS3Kr5lFHjtKg4PvjpguIXuMM",
     startMenuPhotoUrl: "https://img1.pixhost.to/images/10473/665370140_alwayszakzz.jpg",
 
     //Apikey OTP nya
-    rumahOtpApiKey: "otp_spJFNjFeOTobMIMf",
+    rumahOtpApiKey: "rk-dev-sy6Zi4vWOuDmLCdQrRSotT3paS4M39zd",
     
     ///Database
     mongoDbUri: "mongodb+srv://Fandirr:QWERTY@data-fandirr.oycvw.mongodb.net/?retryWrites=true&w=majority&appName=Data-Fandirr",
