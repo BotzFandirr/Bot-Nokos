@@ -145,7 +145,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
     // 1. HANDLE CALLBACK (Tombol)
     if (query) {
         const data = query.data;
-        if (!data.startsWith('lay_page:') && !data.startsWith('lay_close') && data !== 'order') return;
+        if (!data.startsWith('lay_page:') && !data.startsWith('lay_close') && data !== 'order' && data !== 'order_srv1') return;
 
         (async () => {
             const chatId = query.message.chat.id;
@@ -161,6 +161,28 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                             chat_id: chatId, message_id: messageId, parse_mode: "Markdown"
                          }).catch(()=>{});
                     }
+                }
+
+                if (data === 'order') {
+                    await bot.editMessageCaption(
+                        `📦 *PILIH SERVER ORDER*\n\nSilakan pilih sumber layanan yang ingin dipakai.\n\n1️⃣ *Server 1:* RumahOTP (flow lama)\n2️⃣ *Server 2:* JasaOTP (pilih negara dulu)`,
+                        {
+                            chat_id: chatId,
+                            message_id: messageId,
+                            parse_mode: "Markdown",
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [
+                                        { text: "1️⃣ Server 1", callback_data: "order_srv1" },
+                                        { text: "2️⃣ Server 2", callback_data: "order_srv2" }
+                                    ],
+                                    [{ text: "🏠 Menu", callback_data: "start" }]
+                                ]
+                            }
+                        }
+                    );
+                    await bot.answerCallbackQuery(query.id);
+                    return;
                 }
 
                 // [LOGIKA PANDUAN DENGAN HALAMAN]
