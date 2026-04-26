@@ -236,7 +236,7 @@ async function showMainMenu(bot, db, settings, chatId, userId, userNameRaw, mess
 `*AlwaysZakzz Layanan Otomatis*
 
 👤 ɴᴀᴍᴀ ᴘᴇɴɢɢᴜɴᴀ : *${userName}*
-💳 ꜱᴀʟᴅᴏ ᴘᴀɴᴇʟ (Server 1): ${saldoPanelStr}\n💳 ꜱᴀʟᴅᴏ ᴘᴀɴᴇʟ (Server 2): ${saldoPanel2Str}
+💳 Saldo Panel (ZakzzOtp 1): ${saldoPanelStr}\n💳 Saldo Panel (ZakzzOtp 2): ${saldoPanel2Str}
 💰 ꜱᴀʟᴅᴏ ʟᴏᴋᴀʟ: Rp${saldo.toLocaleString('id-ID')}
 📦 ᴛᴏᴛᴀʟ ᴏʀᴅᴇʀ: ${history.length}
 🧾 ᴛᴏᴛᴀʟ ᴅᴇᴘᴏꜱɪᴛ: ${totalDeposit}
@@ -278,16 +278,19 @@ function mainKeyboard() {
   return {
     inline_keyboard: [
       [
-        { text: "📦 ORDER NOKOS", callback_data: "order" },
-        { text: "💳 DEPOSIT", callback_data: "deposit" }
+        { text: "📦 NOKOS SRV 1", callback_data: "order_srv1" },
+        { text: "📦 NOKOS SRV 2", callback_data: "order_srv2" }
       ],
       [
-        { text: "💰 REFRESH SALDO", callback_data: "start" }, 
-        { text: "🧾 RIWAYAT NOKOS", callback_data: "riwayat" }
+        { text: "💳 DEPOSIT", callback_data: "deposit" },
+        { text: "💰 REFRESH SALDO", callback_data: "start" }
       ],
       [
-        { text: "🏆 TOP USER", callback_data: "topuser" },
+        { text: "🧾 RIWAYAT NOKOS", callback_data: "riwayat" },
         { text: "❓ BANTUAN", callback_data: "bantuan" }
+      ],
+      [
+        { text: "🏆 TOP USER", callback_data: "topuser" }
       ],
       [
         { text: "🛒 ORDER SCRIPT BOT", callback_data: "buyscript" }

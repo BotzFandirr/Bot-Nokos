@@ -111,7 +111,8 @@ async function orderCreated({
   negara,
   user_name,
   username,
-  notifyText = true
+  notifyText = true,
+  server = 'Server 1'
 }) {
   // Catat ke ledger
   await appendLedger("order_created", {
@@ -135,8 +136,7 @@ async function orderCreated({
 
     // Template pesan ringkas mengikuti input kamu
     const text =
-`*🛒 Order Baru*
-• OrderID: \`${order_id}\`
+`*🛒 Order Baru*\n\n*${escMd(server)}*\n\n• OrderID: \`${order_id}\`
 • UserID: \`${user_id}\`
 • Nama User: ${escMd(user_name || "-")} ${username ? `(@${escMd(username)})` : ""}
 • Layanan: *${escMd(layanan || "-")}*

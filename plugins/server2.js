@@ -2,6 +2,7 @@ const axios = require('axios');
 
 const BASE_URL = 'https://api.jasaotp.id/v1';
 const ITEMS_PER_PAGE = 20;
+const SERVER2_EXPIRE_MINUTES = 15;
 
 if (!global.server2Cache) {
   global.server2Cache = {
@@ -42,7 +43,25 @@ function normalizeServices(raw, countryId) {
     stok: Number(v?.stok || 0),
     layanan: v?.layanan || code
   }));
-  return list.sort((a, b) => a.harga - b.harga);
+
+  const prioritized = [];
+  const rest = [];
+  for (const item of list) {
+    const svc = String(item.layanan || '').toLowerCase();
+    const code = String(item.code || '').toLowerCase();
+    if (svc === 'whatsapp' || code === 'wa') prioritized.push({ ...item, __p: 1 });
+    else if (svc === 'telegram' || code === 'tg') prioritized.push({ ...item, __p: 2 });
+    else rest.push(item);
+  }
+
+  rest.sort((a, b) => {
+    const nameA = String(a.layanan || a.code || '').toLowerCase();
+    const nameB = String(b.layanan || b.code || '').toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+
+  prioritized.sort((a, b) => a.__p - b.__p);
+  return [...prioritized, ...rest].map(({ __p, ...x }) => x);
 }
 
 async function getCountries() {
@@ -125,6 +144,34 @@ function buildServicePage(countryId, services, page = 1) {
   };
 }
 
+function capitalizeWords(str = '') {
+  return String(str).replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, amount) {
+  setTimeout(async () => {
+    try {
+      const ownerId = await db.getOrderOwner(orderId);
+      if (!ownerId || String(ownerId) !== String(userId)) return;
+
+      const cancel = await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
+      if (!cancel?.success) return;
+
+      const lock = await db.removeOrder(orderId);
+      if (!lock) return;
+
+      await db.markOrderAsRefundedOnce(userId, orderId, 'expired', { cancel_reason: 'Auto expired 15 menit (server2)' });
+      await db.tambahSaldo(userId, amount);
+      const saldoBaru = await db.cekSaldo(userId);
+
+      await bot.sendMessage(chatId,
+        `⌛ *AUTO EXPIRED SERVER 2*\n\n🆔 Order: \`${orderId}\`\nℹ️ Batas bot 15 menit tercapai, order dibatalkan otomatis.\n💰 Refund: ${formatRupiah(amount)}\n💳 Saldo: ${formatRupiah(saldoBaru)}`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    } catch (e) {}
+  }, SERVER2_EXPIRE_MINUTES * 60 * 1000);
+}
+
 module.exports = (bot, db, settings, pendingDeposits, query) => {
   if (!query) return;
 
@@ -205,20 +252,26 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const orderId = String(order.data.order_id);
         await db.kurangSaldo(userId, finalPrice);
         await db.saveOrder(orderId, userId);
+        const countries = await getCountries();
+        const countryName = countries.find((c) => String(c.id_negara) === String(countryId))?.nama_negara || String(countryId);
+
         await db.addOrderHistory(userId, {
           orderId,
-          layanan: `${target.layanan} (S2)`,
+          layanan: `${target.layanan}`,
           nomor: order.data.number,
           harga: finalPrice,
           tanggal: new Date().toISOString(),
           status: 'pending',
           server: 'server2',
-          operator
+          operator,
+          negara: capitalizeWords(countryName)
         });
+
+        scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, finalPrice);
 
         const sisa = await db.cekSaldo(userId);
         await bot.editMessageCaption(
-          `✅ *ORDER BERHASIL (SERVER 2)*\n\n🆔 Order: \`${orderId}\`\n📞 Nomor: \`${order.data.number}\`\n📱 Layanan: ${target.layanan}\n🌐 Negara ID: ${countryId}\n💰 Harga: ${formatRupiah(finalPrice)}\n💳 Saldo: ${formatRupiah(sisa)}`,
+          `✅ *ORDER BERHASIL (SERVER 2)*\n\n🆔 Order: \`${orderId}\`\n📞 Nomor: \`${order.data.number}\`\n📱 Layanan: ${target.layanan}\n🌐 Negara: ${capitalizeWords(countryName)}\n💰 Harga: ${formatRupiah(finalPrice)}\n💳 Saldo: ${formatRupiah(sisa)}`,
           {
             chat_id: chatId,
             message_id: messageId,
@@ -234,6 +287,22 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
             }
           }
         );
+
+        try {
+          const Notifikasi = require('../notifikasi');
+          await Notifikasi.orderCreated({
+            server: 'Server 2',
+            order_id: orderId,
+            user_id: userId,
+            user_name: query.from.first_name || 'User',
+            username: query.from.username || '',
+            number: order.data.number,
+            layanan: capitalizeWords(target.layanan),
+            negara: capitalizeWords(countryName),
+            harga_final: finalPrice
+          });
+        } catch {}
+
         return;
       }
 
@@ -242,6 +311,23 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const ownerId = await db.getOrderOwner(orderId);
         if (!ownerId || String(ownerId) !== String(userId)) {
           await bot.answerCallbackQuery(query.id, { text: 'Ini bukan order kamu.', show_alert: true });
+          return;
+        }
+
+        const history = await db.getOrderHistory(userId);
+        const orderLocal = history.find((x) => String(x.orderId) === String(orderId));
+        const createdAt = new Date(orderLocal?.tanggal || Date.now()).getTime();
+        if (Date.now() - createdAt >= SERVER2_EXPIRE_MINUTES * 60 * 1000) {
+          await bot.answerCallbackQuery(query.id, { text: 'Order expired 15 menit, auto cancel...', show_alert: true });
+          const cancel = await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
+          if (cancel?.success) {
+            const lock = await db.removeOrder(orderId);
+            if (lock) {
+              const refund = Number(orderLocal?.harga || 0);
+              await db.markOrderAsRefundedOnce(userId, orderId, 'expired', { cancel_reason: 'Auto expired 15 menit saat cek otp' });
+              await db.tambahSaldo(userId, refund);
+            }
+          }
           return;
         }
 

@@ -163,27 +163,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                     }
                 }
 
-                if (data === 'order') {
-                    await bot.editMessageCaption(
-                        `📦 *PILIH SERVER ORDER*\n\nSilakan pilih sumber layanan yang ingin dipakai.\n\n1️⃣ *Server 1:* RumahOTP (flow lama)\n2️⃣ *Server 2:* JasaOTP (pilih negara dulu)`,
-                        {
-                            chat_id: chatId,
-                            message_id: messageId,
-                            parse_mode: "Markdown",
-                            reply_markup: {
-                                inline_keyboard: [
-                                    [
-                                        { text: "1️⃣ Server 1", callback_data: "order_srv1" },
-                                        { text: "2️⃣ Server 2", callback_data: "order_srv2" }
-                                    ],
-                                    [{ text: "🏠 Menu", callback_data: "start" }]
-                                ]
-                            }
-                        }
-                    );
-                    await bot.answerCallbackQuery(query.id);
-                    return;
-                }
+                // kompatibilitas tombol lama /order -> langsung ke Server 1
 
                 // [LOGIKA PANDUAN DENGAN HALAMAN]
                 if (data.startsWith('lay_page:guide')) {
