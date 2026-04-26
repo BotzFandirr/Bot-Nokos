@@ -251,7 +251,8 @@ module.exports = (bot, db, settings) => {
                             number: phone_number,
                             layanan: service,
                             negara: country,
-                            harga_final: finalPrice
+                            harga_final: finalPrice,
+                            server: 'Server 1'
                         });
                     } catch {}
                 }
