@@ -197,8 +197,9 @@ async function showMainMenu(bot, db, settings, chatId, userId, userNameRaw, mess
     const totalPengguna = await db.countTotalUsers(); 
     const totalDeposit = await db.countDeposits(userId);
 
-    // 3. Ambil Saldo Panel RumahOTP (API V1)
+    // 3. Ambil Saldo Panel RumahOTP (Server 1)
     let saldoPanelStr = "Rp0"; 
+    let saldoPanel2Str = "Rp0";
     try {
         // [DOC] Endpoint V1: user/balance
         const apiUrl = `https://www.rumahotp.io/api/v1/user/balance`;
@@ -218,12 +219,24 @@ async function showMainMenu(bot, db, settings, chatId, userId, userNameRaw, mess
         console.warn("[start.js] Gagal fetch saldo panel:", e.message);
     }
 
+    try {
+        const s2 = await axios.get('https://api.jasaotp.id/v1/balance.php', {
+            params: { api_key: settings.jasaOtpApiKey },
+            timeout: 5000
+        });
+        if (s2.data?.success && s2.data?.data) {
+            saldoPanel2Str = `Rp${Number(s2.data.data.saldo || 0).toLocaleString('id-ID')}`;
+        }
+    } catch (e) {
+        console.warn('[start.js] Gagal fetch saldo panel server2:', e.message);
+    }
+
     // 4. Susun Caption
     const caption =
 `*AlwaysZakzz Layanan Otomatis*
 
 👤 ɴᴀᴍᴀ ᴘᴇɴɢɢᴜɴᴀ : *${userName}*
-💳 ꜱᴀʟᴅᴏ ᴘᴀɴᴇʟ (ZakzzOTP): ${saldoPanelStr}
+💳 ꜱᴀʟᴅᴏ ᴘᴀɴᴇʟ (Server 1): ${saldoPanelStr}\n💳 ꜱᴀʟᴅᴏ ᴘᴀɴᴇʟ (Server 2): ${saldoPanel2Str}
 💰 ꜱᴀʟᴅᴏ ʟᴏᴋᴀʟ: Rp${saldo.toLocaleString('id-ID')}
 📦 ᴛᴏᴛᴀʟ ᴏʀᴅᴇʀ: ${history.length}
 🧾 ᴛᴏᴛᴀʟ ᴅᴇᴘᴏꜱɪᴛ: ${totalDeposit}
