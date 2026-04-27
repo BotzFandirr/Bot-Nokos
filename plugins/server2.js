@@ -203,24 +203,57 @@ function extractOtpValue(smsResponse) {
   return null;
 }
 
+async function forceExpireServer2Order(db, settings, userId, order, reason = 'Auto expired 15 menit') {
+  const orderId = String(order?.orderId || '');
+  if (!orderId) return { canceledAtApi: false, refunded: false };
+
+  let canceledAtApi = false;
+  try {
+    const cancel = await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
+    canceledAtApi = cancel?.success === true;
+  } catch (e) {}
+
+  const refund = Number(order?.harga || 0);
+  const lock = await db.removeOrder(orderId);
+
+  if (!lock) {
+    await db.updateOrderHistoryStatus(userId, orderId, 'expired', {
+      cancel_reason: `${reason}${canceledAtApi ? ' | canceled_api' : ' | cancel_api_failed'}`
+    });
+    return { canceledAtApi, refunded: false };
+  }
+
+  const marked = await db.markOrderAsRefundedOnce(userId, orderId, 'expired', {
+    cancel_reason: `${reason}${canceledAtApi ? ' | canceled_api' : ' | cancel_api_failed'}`
+  });
+
+  if (marked && refund > 0) {
+    await db.tambahSaldo(userId, refund);
+  } else {
+    await db.updateOrderHistoryStatus(userId, orderId, 'expired', {
+      cancel_reason: `${reason}${canceledAtApi ? ' | canceled_api' : ' | cancel_api_failed'}`
+    });
+  }
+
+  return { canceledAtApi, refunded: marked && refund > 0 };
+}
+
 function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, amount) {
   setTimeout(async () => {
     try {
       const ownerId = await db.getOrderOwner(orderId);
       if (!ownerId || String(ownerId) !== String(userId)) return;
 
-      const cancel = await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
-      if (!cancel?.success) return;
-
-      const lock = await db.removeOrder(orderId);
-      if (!lock) return;
-
-      await db.markOrderAsRefundedOnce(userId, orderId, 'expired', { cancel_reason: 'Auto expired 15 menit (server2)' });
-      await db.tambahSaldo(userId, amount);
+      await forceExpireServer2Order(db, settings, userId, { orderId, harga: amount }, 'Auto expired 15 menit (timer)');
       const saldoBaru = await db.cekSaldo(userId);
 
       await bot.sendMessage(chatId,
-        `⌛ *AUTO EXPIRED SERVER 2*\n\n🆔 Order: \`${orderId}\`\nℹ️ Batas bot 15 menit tercapai, order dibatalkan otomatis.\n💰 Refund: ${formatRupiah(amount)}\n💳 Saldo: ${formatRupiah(saldoBaru)}`,
+        `⌛ *AUTO EXPIRED SERVER 2*
+
+🆔 Order: \`${orderId}\`
+ℹ️ Batas bot 15 menit tercapai, order dibatalkan otomatis.
+💰 Refund: ${formatRupiah(amount)}
+💳 Saldo: ${formatRupiah(saldoBaru)}`,
         { parse_mode: 'Markdown' }
       ).catch(() => {});
     } catch (e) {}
@@ -229,20 +262,7 @@ function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, a
 
 
 async function processServer2ExpiryOrder(db, settings, userId, order) {
-  const orderId = String(order.orderId || '');
-  if (!orderId) return false;
-
-  try {
-    await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
-  } catch (e) {}
-
-  const lock = await db.removeOrder(orderId);
-  if (!lock) return false;
-
-  const refund = Number(order.harga || 0);
-  await db.markOrderAsRefundedOnce(userId, orderId, 'expired', { cancel_reason: 'Auto expired 15 menit (watcher)' });
-  if (refund > 0) await db.tambahSaldo(userId, refund);
-  return true;
+  return forceExpireServer2Order(db, settings, userId, order, 'Auto expired 15 menit (watcher)');
 }
 
 function startServer2ExpiryWatcher(bot, db, settings) {
@@ -437,15 +457,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const createdAt = new Date(orderLocal?.tanggal || Date.now()).getTime();
         if (Date.now() - createdAt >= SERVER2_EXPIRE_MINUTES * 60 * 1000) {
           await bot.answerCallbackQuery(query.id, { text: 'Order expired 15 menit, auto cancel...', show_alert: true });
-          const cancel = await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
-          if (cancel?.success) {
-            const lock = await db.removeOrder(orderId);
-            if (lock) {
-              const refund = Number(orderLocal?.harga || 0);
-              await db.markOrderAsRefundedOnce(userId, orderId, 'expired', { cancel_reason: 'Auto expired 15 menit saat cek otp' });
-              await db.tambahSaldo(userId, refund);
-            }
-          }
+          await forceExpireServer2Order(db, settings, userId, orderLocal || { orderId, harga: 0 }, 'Auto expired 15 menit saat cek otp');
           return;
         }
 
