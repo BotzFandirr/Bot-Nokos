@@ -4,6 +4,7 @@ const BASE_URL = 'https://api.jasaotp.id/v1';
 const ITEMS_PER_PAGE = 20;
 const SERVER2_EXPIRE_MINUTES = 15;
 const MIN_CANCEL_MINUTES = 3;
+const SERVICES_CACHE_TTL_MS = 2 * 60 * 1000;
 
 if (!global.server2Cache) {
   global.server2Cache = {
@@ -45,13 +46,23 @@ function normalizeCountries(raw) {
 }
 
 function normalizeServices(raw, countryId) {
-  const bucket = raw?.[String(countryId)] || {};
+  const cKey = String(countryId);
+
+  let bucket = null;
+  if (raw && typeof raw === 'object') {
+    if (raw[cKey] && typeof raw[cKey] === 'object') bucket = raw[cKey];
+    else if (raw?.data?.[cKey] && typeof raw.data[cKey] === 'object') bucket = raw.data[cKey];
+    else if (raw?.data && typeof raw.data === 'object' && raw.data[cKey] && typeof raw.data[cKey] === 'object') bucket = raw.data[cKey];
+  }
+
+  if (!bucket || typeof bucket !== 'object') return [];
+
   const list = Object.entries(bucket).map(([code, v]) => ({
-    code,
+    code: String(code),
     harga: toNumberSafe(v?.harga || 0),
     stok: toNumberSafe(v?.stok || 0),
-    layanan: v?.layanan || code
-  }));
+    layanan: String(v?.layanan || code)
+  })).filter((x) => x.code && x.layanan);
 
   const prioritized = [];
   const rest = [];
@@ -81,11 +92,20 @@ async function getCountries() {
   return countries;
 }
 
-async function getServices(countryId) {
-  if (global.server2Cache.servicesByCountry[countryId]) return global.server2Cache.servicesByCountry[countryId];
+async function getServices(countryId, { force = false } = {}) {
+  const key = String(countryId);
+  const cached = global.server2Cache.servicesByCountry[key];
+  if (!force && cached && (Date.now() - (cached.ts || 0) < SERVICES_CACHE_TTL_MS)) {
+    return cached.list || [];
+  }
+
   const data = await apiGet('layanan.php', { negara: countryId });
   const list = normalizeServices(data, countryId);
-  global.server2Cache.servicesByCountry[countryId] = list;
+
+  if (list.length > 0 || force) {
+    global.server2Cache.servicesByCountry[key] = { ts: Date.now(), list };
+  }
+
   return list;
 }
 
@@ -294,7 +314,16 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
       if (data.startsWith('s2_pick_country:')) {
         const [, countryId, pageStr] = data.split(':');
         const page = parseInt(pageStr, 10) || 1;
-        const services = await getServices(countryId);
+        let services = await getServices(countryId);
+        if (!services.length) services = await getServices(countryId, { force: true });
+        if (!services.length) {
+          await bot.answerCallbackQuery(query.id, {
+            text: 'Layanan kosong sementara, coba lagi beberapa detik.',
+            show_alert: true
+          });
+          return;
+        }
+
         const pageData = buildServicePage(countryId, services, page, settings.layananMarkupRate);
         await bot.editMessageCaption(pageData.caption, {
           chat_id: chatId,
@@ -308,7 +337,8 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
       if (data.startsWith('s2_buy:')) {
         const [, countryId, serviceCode] = data.split(':');
-        const services = await getServices(countryId);
+        let services = await getServices(countryId);
+        if (!services.length) services = await getServices(countryId, { force: true });
         const target = services.find((x) => String(x.code).toLowerCase() === String(serviceCode).toLowerCase());
         if (!target || target.stok <= 0) {
           await bot.answerCallbackQuery(query.id, { text: 'Stok habis.', show_alert: true });
@@ -331,7 +361,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const order = await apiGet('order.php', {
           api_key: settings.jasaOtpApiKey,
           negara: countryId,
-          layanan: serviceCode,
+          layanan: target.code,
           operator
         });
 
