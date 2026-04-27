@@ -12,6 +12,7 @@ if (!global.server2Cache) {
     operatorsByCountry: {}
   };
 }
+if (!global.server2WatcherStarted) global.server2WatcherStarted = false;
 
 const formatRupiah = (n) => `Rp${parseInt(n || 0, 10).toLocaleString('id-ID')}`;
 
@@ -206,8 +207,61 @@ function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, a
   }, SERVER2_EXPIRE_MINUTES * 60 * 1000);
 }
 
+
+async function processServer2ExpiryOrder(db, settings, userId, order) {
+  const orderId = String(order.orderId || '');
+  if (!orderId) return false;
+
+  try {
+    await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
+  } catch (e) {}
+
+  const lock = await db.removeOrder(orderId);
+  if (!lock) return false;
+
+  const refund = Number(order.harga || 0);
+  await db.markOrderAsRefundedOnce(userId, orderId, 'expired', { cancel_reason: 'Auto expired 15 menit (watcher)' });
+  if (refund > 0) await db.tambahSaldo(userId, refund);
+  return true;
+}
+
+function startServer2ExpiryWatcher(bot, db, settings) {
+  if (global.server2WatcherStarted) return;
+  global.server2WatcherStarted = true;
+
+  setInterval(async () => {
+    try {
+      const allUsers = await db.getAllUsersFull();
+      const now = Date.now();
+
+      for (const user of allUsers || []) {
+        const userId = String(user._id || '');
+        const history = Array.isArray(user.history) ? user.history : [];
+
+        for (const order of history) {
+          const isServer2 = String(order?.server || '').toLowerCase() === 'server2';
+          const status = String(order?.status || '').toLowerCase();
+          if (!isServer2 || status !== 'pending') continue;
+
+          const createdAt = new Date(order?.tanggal || order?.updated_at || 0).getTime();
+          if (!createdAt) continue;
+
+          if ((now - createdAt) >= SERVER2_EXPIRE_MINUTES * 60 * 1000) {
+            await processServer2ExpiryOrder(db, settings, userId, order);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[Server2Watcher] gagal sweep expired:', e.message);
+    }
+  }, 30000);
+}
+
 module.exports = (bot, db, settings, pendingDeposits, query) => {
-  if (!query) return;
+  if (!query) {
+    startServer2ExpiryWatcher(bot, db, settings);
+    return;
+  }
 
   const data = query.data || '';
   if (!data.startsWith('order_srv2') &&
