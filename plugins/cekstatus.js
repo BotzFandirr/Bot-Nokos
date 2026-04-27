@@ -25,6 +25,11 @@ function escMd(text = "") {
 
 const rupiah = (n) => "Rp" + Number(n || 0).toLocaleString("id-ID");
 
+function detectServer(orderLocal) {
+  if (String(orderLocal?.server || '').toLowerCase() === 'server2') return 'Server 2';
+  return 'Server 1';
+}
+
 function formatOrderTime(input) {
   if (input == null) return null;
   const d = new Date(Number(input));
@@ -168,22 +173,34 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
       // 3. Saldo User Saat Ini
       const saldoNow = Number(await db.cekSaldo(targetUserId));
 
-      // 4. Request API
+      // 4. Request API (berdasarkan server order)
       let apiData = null;
       let apiStatus = null;
       let sourceInfo = "Database Lokal";
+      const serverLabel = detectServer(orderLocal);
 
       try {
-        const res = await axios.get("https://www.rumahotp.io/api/v1/orders/get_status", {
-          params: { order_id: orderId },
-          headers: { "x-apikey": settings.rumahOtpApiKey, Accept: "application/json" },
-          timeout: 10000,
-        });
-
-        if (res.data?.success && res.data?.data) {
-          apiData = res.data.data;
+        if (serverLabel === 'Server 2') {
+          const res2 = await axios.get('https://api.jasaotp.id/v1/sms.php', {
+            params: { api_key: settings.jasaOtpApiKey, id: orderId },
+            timeout: 10000,
+          });
+          const otp2 = res2.data?.data?.otp;
+          apiData = { otp_code: otp2, status: otp2 && otp2 !== 'Menunggu' ? 'received' : 'waiting' };
           apiStatus = apiData.status;
-          sourceInfo = "Server Pusat (API V1)";
+          sourceInfo = 'Server Pusat (JasaOTP)';
+        } else {
+          const res = await axios.get("https://www.rumahotp.io/api/v1/orders/get_status", {
+            params: { order_id: orderId },
+            headers: { "x-apikey": settings.rumahOtpApiKey, Accept: "application/json" },
+            timeout: 10000,
+          });
+
+          if (res.data?.success && res.data?.data) {
+            apiData = res.data.data;
+            apiStatus = apiData.status;
+            sourceInfo = "Server Pusat (API V1)";
+          }
         }
       } catch (e) {
         sourceInfo = "Lokal (API Gagal)";
@@ -197,7 +214,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
       
       const expiresTs = apiData?.expires_at
           ? Number(apiData.expires_at)
-          : (createdTs + (20 * 60 * 1000)); // Default 20 menit dari created
+          : (createdTs + ((detectServer(orderLocal) === 'Server 2' ? 15 : 20) * 60 * 1000)); // Default sesuai server
 
       const timeInfo = formatOrderTime(createdTs);
       const expInfo = formatOrderTime(expiresTs);
@@ -243,6 +260,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
       text += `👤 User     : ${displayName}\n`;
       text += `📱 Nomor    : \`${escMd(nomor)}\`\n`;
       text += `🔑 OTP      : ${otp}\n`;
+      text += `🖥️ Server   : ${escMd(detectServer(orderLocal))}\n`;
       text += `📦 Layanan  : ${escMd(layanan)} (${escMd(negara)})\n`;
       text += `──────────────────\n`;
       text += `📊 Status   : ${st.emoji} ${st.label}\n`;
