@@ -30,6 +30,12 @@ function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+function detectServer(order) {
+    if (String(order.server || '').toLowerCase() === 'server2' || String(order.layanan || '').toLowerCase().includes('(s2)')) return 'Server 2';
+    return 'Server 1';
+}
+
+
 // 3. Generate Halaman (Text & Buttons)
 function generateRiwayatPage(allLines, userId, currentPage = 1) {
     const totalItems = allLines.length;
@@ -88,8 +94,9 @@ async function fetchAndCacheHistory(db, settings, userId) {
         const hargaFormatted = (order.harga || 0).toLocaleString('id-ID');
         const tgl = moment(order.tanggal).locale('id').format('DD MMM YYYY, HH:mm');
         const statusFormatted = formatStatus(order.status);
+        const serverLabel = detectServer(order);
 
-        return `🆔 \`${order.orderId || order.id}\`\n` +
+        return `🖥️ *${serverLabel}*\n🆔 \`${order.orderId || order.id}\`\n` +
                `🛍️ *${serviceName}* | ${order.nomor || '-'}\n` +
                `💰 Rp${hargaFormatted} | ${statusFormatted}\n` +
                `📅 ${tgl}\n` + 
@@ -117,7 +124,8 @@ async function syncRecentStatuses(db, settings, userId, history) {
         let nextStatus = currentStatus || 'pending';
         let extraData = {};
 
-        if (settings?.rumahOtpApiKey && order.orderId) {
+        const server = detectServer(order);
+        if (order.orderId && server === 'Server 1' && settings?.rumahOtpApiKey) {
             try {
                 const res = await axios.get(`https://www.rumahotp.io/api/v1/orders/get_status`, {
                     params: { order_id: order.orderId },
@@ -143,9 +151,26 @@ async function syncRecentStatuses(db, settings, userId, history) {
             } catch (e) {}
         }
 
+        if (order.orderId && server === 'Server 2' && settings?.jasaOtpApiKey) {
+            try {
+                const res2 = await axios.get('https://api.jasaotp.id/v1/sms.php', {
+                    params: { api_key: settings.jasaOtpApiKey, id: order.orderId },
+                    timeout: 5000
+                });
+                const otp2 = res2.data?.data?.otp;
+                if (otp2 && otp2 !== 'Menunggu') {
+                    nextStatus = 'success';
+                    extraData.otp_code = otp2;
+                } else {
+                    nextStatus = 'pending';
+                }
+            } catch (e) {}
+        }
+
         if (nextStatus === 'pending') {
             const orderTime = new Date(order.tanggal || order.updated_at || 0).getTime();
-            const isLocallyExpired = orderTime && (now - orderTime) >= (20 * 60 * 1000);
+            const expireLimit = server === 'Server 2' ? 15 : 20;
+            const isLocallyExpired = orderTime && (now - orderTime) >= (expireLimit * 60 * 1000);
             if (isLocallyExpired) {
                 nextStatus = 'expired';
                 extraData.cancel_reason = 'Expired saat sinkron riwayat';

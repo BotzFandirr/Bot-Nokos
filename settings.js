@@ -7,6 +7,7 @@ module.exports = {
 
     //Apikey OTP nya
     rumahOtpApiKey: "rk-dev-sy6Zi4vWOuDmLCdQrRSotT3paS4M39zd",
+    jasaOtpApiKey: "7c23218f2673f47038b01f199ac67c9c",
     
     ///Database
     mongoDbUri: "mongodb+srv://Fandirr:QWERTY@data-fandirr.oycvw.mongodb.net/?retryWrites=true&w=majority&appName=Data-Fandirr",

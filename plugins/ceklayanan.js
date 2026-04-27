@@ -145,7 +145,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
     // 1. HANDLE CALLBACK (Tombol)
     if (query) {
         const data = query.data;
-        if (!data.startsWith('lay_page:') && !data.startsWith('lay_close') && data !== 'order') return;
+        if (!data.startsWith('lay_page:') && !data.startsWith('lay_close') && data !== 'order' && data !== 'order_srv1') return;
 
         (async () => {
             const chatId = query.message.chat.id;
@@ -162,6 +162,8 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                          }).catch(()=>{});
                     }
                 }
+
+                // kompatibilitas tombol lama /order -> langsung ke Server 1
 
                 // [LOGIKA PANDUAN DENGAN HALAMAN]
                 if (data.startsWith('lay_page:guide')) {
