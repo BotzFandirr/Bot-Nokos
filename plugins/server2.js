@@ -3,6 +3,7 @@ const axios = require('axios');
 const BASE_URL = 'https://api.jasaotp.id/v1';
 const ITEMS_PER_PAGE = 20;
 const SERVER2_EXPIRE_MINUTES = 15;
+const MIN_CANCEL_MINUTES = 3;
 
 if (!global.server2Cache) {
   global.server2Cache = {
@@ -13,6 +14,13 @@ if (!global.server2Cache) {
 }
 
 const formatRupiah = (n) => `Rp${parseInt(n || 0, 10).toLocaleString('id-ID')}`;
+
+function toNumberSafe(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const cleaned = String(v || '0').replace(/[^0-9.-]/g, '');
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
 
 function getFinalPrice(originalHarga, markupRateString) {
   let markupDecimal = 0;
@@ -39,8 +47,8 @@ function normalizeServices(raw, countryId) {
   const bucket = raw?.[String(countryId)] || {};
   const list = Object.entries(bucket).map(([code, v]) => ({
     code,
-    harga: Number(v?.harga || 0),
-    stok: Number(v?.stok || 0),
+    harga: toNumberSafe(v?.harga || 0),
+    stok: toNumberSafe(v?.stok || 0),
     layanan: v?.layanan || code
   }));
 
@@ -115,7 +123,7 @@ function buildCountryPage(countries, page = 1) {
   };
 }
 
-function buildServicePage(countryId, services, page = 1) {
+function buildServicePage(countryId, services, page = 1, markupRate = '0%') {
   const totalPages = Math.max(1, Math.ceil(services.length / ITEMS_PER_PAGE));
   const cur = Math.min(Math.max(page, 1), totalPages);
   const start = (cur - 1) * ITEMS_PER_PAGE;
@@ -124,7 +132,8 @@ function buildServicePage(countryId, services, page = 1) {
   const kb = [];
   let row = [];
   for (const s of items) {
-    let label = `${s.layanan} (${formatRupiah(s.harga)})`;
+    const finalPrice = getFinalPrice(s.harga, markupRate);
+    let label = `${s.layanan} (${formatRupiah(finalPrice)})`;
     if (s.stok <= 0) label = `🔴 ${s.layanan}`;
     if (label.length > 30) label = label.slice(0, 28) + '..';
     row.push({ text: label, callback_data: s.stok > 0 ? `s2_buy:${countryId}:${s.code}` : 'noop' });
@@ -160,6 +169,17 @@ async function smartEdit(bot, query, text, options) {
   } catch (e) {
     if (!String(e.message || '').includes('message is not modified')) {}
   }
+}
+
+function extractOtpValue(smsResponse) {
+  const rawOtp = String(smsResponse?.data?.otp ?? '').trim();
+  if (rawOtp && !/menunggu/i.test(rawOtp)) return rawOtp;
+
+  const message = String(smsResponse?.message || smsResponse?.data?.message || '').trim();
+  const digit = message.match(/\b(\d{4,8})\b/);
+  if (digit) return digit[1];
+
+  return null;
 }
 
 function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, amount) {
@@ -221,7 +241,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const [, countryId, pageStr] = data.split(':');
         const page = parseInt(pageStr, 10) || 1;
         const services = await getServices(countryId);
-        const pageData = buildServicePage(countryId, services, page);
+        const pageData = buildServicePage(countryId, services, page, settings.layananMarkupRate);
         await bot.editMessageCaption(pageData.caption, {
           chat_id: chatId,
           message_id: messageId,
@@ -235,7 +255,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
       if (data.startsWith('s2_buy:')) {
         const [, countryId, serviceCode] = data.split(':');
         const services = await getServices(countryId);
-        const target = services.find((x) => x.code === serviceCode);
+        const target = services.find((x) => String(x.code).toLowerCase() === String(serviceCode).toLowerCase());
         if (!target || target.stok <= 0) {
           await bot.answerCallbackQuery(query.id, { text: 'Stok habis.', show_alert: true });
           return;
@@ -346,7 +366,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         }
 
         const sms = await apiGet('sms.php', { api_key: settings.jasaOtpApiKey, id: orderId });
-        const otp = sms?.data?.otp;
+        const otp = extractOtpValue(sms);
 
         const createdAt2 = new Date(orderLocal?.tanggal || Date.now()).getTime();
         const elapsedMs = Math.max(0, Date.now() - createdAt2);
@@ -361,7 +381,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         }).replace(/\./g, ':');
         const currentSaldo = await db.cekSaldo(userId);
 
-        if (otp && otp !== 'Menunggu') {
+        if (otp) {
           await db.updateOrderHistoryStatus(userId, orderId, 'success', { otp_code: otp });
           await db.removeOrder(orderId);
 
@@ -424,9 +444,18 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const orderLocal = history.find((x) => String(x.orderId) === String(orderId));
         const refund = Number(orderLocal?.harga || 0);
 
+        const createdAt = new Date(orderLocal?.tanggal || Date.now()).getTime();
+        const minutesRunning = (Date.now() - createdAt) / 60000;
+        if (minutesRunning < MIN_CANCEL_MINUTES) {
+          await bot.answerCallbackQuery(query.id, {
+            text: `Batalkan order bisa setelah ${MIN_CANCEL_MINUTES} menit.`,
+            show_alert: true
+          });
+          return;
+        }
+
         const cancel = await apiGet('cancel.php', { api_key: settings.jasaOtpApiKey, id: orderId });
         if (!cancel?.success) throw new Error(cancel?.message || 'Gagal membatalkan order.');
-        const refundedApi = Number(cancel?.data?.refunded_amount || 0);
 
         const lock = await db.removeOrder(orderId);
         if (lock && refund > 0) {
@@ -436,7 +465,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const saldoBaru = await db.cekSaldo(userId);
 
         await bot.editMessageCaption(
-          `❌ *ORDER DIBATALKAN (SERVER 2)*\n\n🆔 Order: \`${orderId}\`\n🏦 Refund API: ${formatRupiah(refundedApi)}\n💰 Refund User: ${formatRupiah(refund)}\n💳 Saldo: ${formatRupiah(saldoBaru)}`,
+          `❌ *ORDER DIBATALKAN (SERVER 2)*\n\n🆔 Order: \`${orderId}\`\n💰 Refund: ${formatRupiah(refund)}\n💳 Saldo: ${formatRupiah(saldoBaru)}`,
           {
             chat_id: chatId,
             message_id: messageId,
