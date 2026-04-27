@@ -30,6 +30,7 @@ async function getTopUserLeaderboard(bot, db) {
     const allUsers = allUsersData.map(userDoc => {
         return {
             userId: userDoc._id,
+            username: userDoc?.profile?.username || '',
             orderCount: (userDoc.history && Array.isArray(userDoc.history)) ? userDoc.history.length : 0
         };
     });
@@ -51,24 +52,18 @@ async function renderTopPage(bot, sortedUsers, page = 1) {
 
     let rank = start + 1;
     for (const user of items) {
-        let userName = `User \\(${escapeMarkdown(user.userId)}\\)`; 
-        
-        try {
-            const chat = await bot.getChat(user.userId);
-            const firstName = escapeMarkdown(chat.first_name || '');
-            const lastName = escapeMarkdown(chat.last_name || '');
-            const username = chat.username ? `\\(@${escapeMarkdown(chat.username)}\\)` : '';
-            
-            let constructedName = `${firstName} ${lastName} ${username}`.trim();
-            if (constructedName) {
-                userName = constructedName;
-            } else {
-                 userName = `User \\(${escapeMarkdown(user.userId)}\\)`;
-            }
+        let usernameText = user.username ? `@${escapeMarkdown(user.username)}` : '';
 
-        } catch (e) {
-            console.warn(`Gagal fetch nama for user ${user.userId}: ${e.message}`);
+        if (!usernameText) {
+            try {
+                const chat = await bot.getChat(user.userId);
+                if (chat?.username) usernameText = `@${escapeMarkdown(chat.username)}`;
+            } catch (e) {
+                console.warn(`Gagal fetch username for user ${user.userId}: ${e.message}`);
+            }
         }
+
+        const userName = usernameText || '_tanpa username_';
         
         let emoji = "";
         if (rank === 1) emoji = "🥇";
