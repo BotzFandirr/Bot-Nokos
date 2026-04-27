@@ -405,7 +405,8 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
                     number: phone_number,
                     layanan: service,
                     negara: country,
-                    harga_final: finalHarga
+                    harga_final: finalHarga,
+                    server: 'Server 1'
                 });
             } catch {}
 
