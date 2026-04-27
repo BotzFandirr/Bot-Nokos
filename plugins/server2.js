@@ -148,6 +148,20 @@ function capitalizeWords(str = '') {
   return String(str).replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+
+async function smartEdit(bot, query, text, options) {
+  const chatId = query.message.chat.id;
+  const messageId = query.message.message_id;
+  const opts = { ...options, chat_id: chatId, message_id: messageId };
+
+  try {
+    if (query.message.photo) await bot.editMessageCaption(text, opts);
+    else await bot.editMessageText(text, opts);
+  } catch (e) {
+    if (!String(e.message || '').includes('message is not modified')) {}
+  }
+}
+
 function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, amount) {
   setTimeout(async () => {
     try {
@@ -334,21 +348,65 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const sms = await apiGet('sms.php', { api_key: settings.jasaOtpApiKey, id: orderId });
         const otp = sms?.data?.otp;
 
+        const createdAt2 = new Date(orderLocal?.tanggal || Date.now()).getTime();
+        const elapsedMs = Math.max(0, Date.now() - createdAt2);
+        const remainingMs = Math.max(0, SERVER2_EXPIRE_MINUTES * 60 * 1000 - elapsedMs);
+        const timeLeftStr = `${Math.ceil(remainingMs / 60000)} Menit`;
+        const timeNow = new Date().toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+          timeZone: 'Asia/Jakarta'
+        }).replace(/\./g, ':');
+        const currentSaldo = await db.cekSaldo(userId);
+
         if (otp && otp !== 'Menunggu') {
           await db.updateOrderHistoryStatus(userId, orderId, 'success', { otp_code: otp });
           await db.removeOrder(orderId);
-          await bot.editMessageCaption(
-            `✅ *OTP DITERIMA (SERVER 2)*\n\n🆔 Order: \`${orderId}\`\n🔑 OTP: \`${otp}\``,
-            {
-              chat_id: chatId,
-              message_id: messageId,
-              parse_mode: 'Markdown',
-              reply_markup: { inline_keyboard: [[{ text: '🏠 Menu', callback_data: 'start' }]] }
-            }
-          );
+
+          const updateCaption = `✅ *ORDER BERHASIL DIBUAT*\n` +
+            `━━━━━━━━━━━━━━━━━━\n` +
+            `🆔 Order ID: \`${orderId}\`\n` +
+            `📞 Nomor: \`${orderLocal?.nomor || '-'}\`\n` +
+            `📱 Layanan: ${orderLocal?.layanan || '-'}\n` +
+            `💰 Harga: Rp${Number(orderLocal?.harga || 0).toLocaleString('id-ID')}\n` +
+            `━━━━━━━━━━━━━━━━━━\n\n` +
+            `🔑 *KODE OTP:* \`${otp}\`\n` +
+            `📊 *Status:* ✅ RECEIVED\n\n` +
+            `🔄 _Update: ${timeNow} WIB_\n` +
+            `💳 Sisa Saldo: *Rp${currentSaldo.toLocaleString('id-ID')}*`;
+
+          await smartEdit(bot, query, updateCaption, {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: [[{ text: '🏠 Menu', callback_data: 'start' }]] }
+          });
           await bot.answerCallbackQuery(query.id, { text: `OTP: ${otp}`, show_alert: true });
           return;
         }
+
+        const updateCaption = `✅ *ORDER BERHASIL DIBUAT*\n` +
+          `━━━━━━━━━━━━━━━━━━\n` +
+          `🆔 Order ID: \`${orderId}\`\n` +
+          `📞 Nomor: \`${orderLocal?.nomor || '-'}\`\n` +
+          `📱 Layanan: ${orderLocal?.layanan || '-'}\n` +
+          `💰 Harga: Rp${Number(orderLocal?.harga || 0).toLocaleString('id-ID')}\n` +
+          `━━━━━━━━━━━━━━━━━━\n\n` +
+          `🔑 *KODE OTP:* _Menunggu OTP..._\n` +
+          `📊 *Status:* ⏳ WAITING\n\n` +
+          `⏳ Sisa Waktu: ${timeLeftStr}\n` +
+          `🔄 _Update: ${timeNow} WIB_\n` +
+          `💳 Sisa Saldo: *Rp${currentSaldo.toLocaleString('id-ID')}*`;
+
+        await smartEdit(bot, query, updateCaption, {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '📩 Cek OTP', callback_data: `ord2_cekotp:${orderId}` },
+              { text: '❌ Batalkan', callback_data: `ord2_batal:${orderId}` }
+            ]]
+          }
+        });
 
         await bot.answerCallbackQuery(query.id, { text: 'Masih menunggu OTP...' });
         return;
