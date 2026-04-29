@@ -104,6 +104,45 @@ async function processRefund(bot, db, userId, orderId, amount, reason, query, fi
     });
 }
 
+async function processExpiredWithoutRefund(bot, db, userId, orderId, reason, query) {
+    const orderLock = await db.removeOrder(orderId);
+    if (!orderLock) {
+        await smartEdit(bot, query, `ℹ️ *Order sudah diproses sebelumnya*\n\n🆔 \`${orderId}\``, {
+            parse_mode: "Markdown",
+            reply_markup: {
+                inline_keyboard: [[{ text: "🏠 Menu Utama", callback_data: "start" }]]
+            }
+        });
+        return;
+    }
+
+    await db.updateOrderHistoryStatus(userId, orderId, 'expired', {
+        cancel_reason: reason
+    });
+
+    const saldoBaru = await db.cekSaldo(userId);
+    const history = await db.getOrderHistory(userId);
+    const orderData = history.find(h => String(h.orderId) === String(orderId)) || {};
+
+    const msg = `⌛ *PESANAN EXPIRED/HANGUS*\n\n` +
+        `🆔 Order: \`${orderId}\`\n` +
+        `🧩 ID Layanan: \`${orderData.layananId || '-'}\`\n` +
+        `📱 Layanan: ${orderData.layanan || '-'}\n` +
+        `🌐 Negara: ${orderData.negara || '-'}\n` +
+        `📞 Nomor: \`${orderData.nomor || '-'}\`\n` +
+        `ℹ️ Batas waktu layanan tercapai. Pesanan otomatis dibatalkan.\n` +
+        `💰 Refund: ❌ Tidak ada pengembalian saldo\n` +
+        `💳 Saldo tersisa: *Rp${saldoBaru.toLocaleString('id-ID')}*\n\n` +
+        `Terima kasih telah menggunakan layanan kami\\.`;
+
+    await smartEdit(bot, query, msg, {
+        parse_mode: "Markdown",
+        reply_markup: {
+            inline_keyboard: [[ { text: "🏠 Menu Utama", callback_data: "start" } ]]
+        }
+    });
+}
+
 function scheduleOrderExpiryReminder(bot, db, userId, chatId, orderId) {
     const reminderDelayMs = (MAX_EXPIRE_MINUTES - REMINDER_BEFORE_EXPIRE_MINUTES) * 60 * 1000;
 
@@ -172,14 +211,14 @@ async function handleOrderCallback(bot, db, settings, query) {
             
             // A. LOGIKA AUTO-EXPIRED LOKAL
             if (durationMinutes >= MAX_EXPIRE_MINUTES) {
-                await bot.answerCallbackQuery(query.id, { text: "⏳ Waktu habis, memproses refund...", show_alert: true });
+                await bot.answerCallbackQuery(query.id, { text: "⌛ Pesanan telah expired.", show_alert: true });
                 try {
                     await axios.get(`https://www.rumahotp.io/api/v1/orders/set_status`, {
                         params: { order_id: orderId, status: 'cancel' },
                         headers: getHeaders()
                     });
                 } catch (err) {}
-                await processRefund(bot, db, userId, orderId, orderData.harga, "Waktu Habis (Expired)", query, 'expired');
+                await processExpiredWithoutRefund(bot, db, userId, orderId, "Waktu Habis (Expired)", query);
                 return; 
             }
 
@@ -197,10 +236,14 @@ async function handleOrderCallback(bot, db, settings, query) {
             const status = (apiData.status || '').toLowerCase(); 
 
             // C. LOGIKA STATUS
-            if (status === 'canceled' || status === 'expired') {
-                // JIKA BATAL/EXPIRED -> REFUND
+            if (status === 'canceled') {
                 await bot.answerCallbackQuery(query.id, { text: "❌ Order dibatalkan server, memproses refund...", show_alert: true });
-                await processRefund(bot, db, userId, orderId, orderData.harga, "Dibatalkan Server/Expired", query, 'expired');
+                await processRefund(bot, db, userId, orderId, orderData.harga, "Dibatalkan Server", query, 'canceled');
+                return;
+
+            } else if (status === 'expired') {
+                await bot.answerCallbackQuery(query.id, { text: "⌛ Pesanan telah expired.", show_alert: true });
+                await processExpiredWithoutRefund(bot, db, userId, orderId, "Expired dari Server", query);
                 return;
             
             } else if (otp && otp !== '-' && (status === 'received' || status === 'completed')) {
@@ -372,7 +415,16 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
             await db.kurangSaldo(userId, finalHarga);
             await db.saveOrder(order_id, userId);
-            await db.addOrderHistory(userId, { orderId: order_id, layanan: service, nomor: phone_number, harga: finalHarga, tanggal: new Date().toISOString(), status: 'pending' });
+            await db.addOrderHistory(userId, {
+                orderId: order_id,
+                layananId: serviceId,
+                layanan: service,
+                negara: country,
+                nomor: phone_number,
+                harga: finalHarga,
+                tanggal: new Date().toISOString(),
+                status: 'pending'
+            });
             scheduleOrderExpiryReminder(bot, db, userId, chatId, order_id);
 
             const newSaldo = await db.cekSaldo(userId);

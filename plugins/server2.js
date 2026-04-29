@@ -203,7 +203,7 @@ function extractOtpValue(smsResponse) {
   return null;
 }
 
-async function forceExpireServer2Order(db, settings, userId, order, reason = 'Auto expired 15 menit') {
+async function forceExpireServer2Order(db, settings, userId, order, reason = 'Pesanan telah expired (15 menit)') {
   const orderId = String(order?.orderId || '');
   if (!orderId) return { canceledAtApi: false, refunded: false };
 
@@ -213,29 +213,13 @@ async function forceExpireServer2Order(db, settings, userId, order, reason = 'Au
     canceledAtApi = cancel?.success === true;
   } catch (e) {}
 
-  const refund = Number(order?.harga || 0);
   const lock = await db.removeOrder(orderId);
 
-  if (!lock) {
-    await db.updateOrderHistoryStatus(userId, orderId, 'expired', {
-      cancel_reason: `${reason}${canceledAtApi ? ' | canceled_api' : ' | cancel_api_failed'}`
-    });
-    return { canceledAtApi, refunded: false };
-  }
-
-  const marked = await db.markOrderAsRefundedOnce(userId, orderId, 'expired', {
+  await db.updateOrderHistoryStatus(userId, orderId, 'expired', {
     cancel_reason: `${reason}${canceledAtApi ? ' | canceled_api' : ' | cancel_api_failed'}`
   });
 
-  if (marked && refund > 0) {
-    await db.tambahSaldo(userId, refund);
-  } else {
-    await db.updateOrderHistoryStatus(userId, orderId, 'expired', {
-      cancel_reason: `${reason}${canceledAtApi ? ' | canceled_api' : ' | cancel_api_failed'}`
-    });
-  }
-
-  return { canceledAtApi, refunded: marked && refund > 0 };
+  return { canceledAtApi, refunded: false, removedActiveOrder: Boolean(lock) };
 }
 
 function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, amount) {
@@ -244,16 +228,24 @@ function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, a
       const ownerId = await db.getOrderOwner(orderId);
       if (!ownerId || String(ownerId) !== String(userId)) return;
 
-      await forceExpireServer2Order(db, settings, userId, { orderId, harga: amount }, 'Auto expired 15 menit (timer)');
+      await forceExpireServer2Order(db, settings, userId, { orderId, harga: amount }, 'Pesanan telah expired (timer 15 menit)');
       const saldoBaru = await db.cekSaldo(userId);
+      const history = await db.getOrderHistory(userId);
+      const orderData = history.find((x) => String(x.orderId) === String(orderId)) || {};
 
       await bot.sendMessage(chatId,
-        `⌛ *AUTO EXPIRED SERVER 2*
+        `⌛ *PESANAN EXPIRED/HANGUS*
 
 🆔 Order: \`${orderId}\`
-ℹ️ Batas bot 15 menit tercapai, order dibatalkan otomatis.
-💰 Refund: ${formatRupiah(amount)}
-💳 Saldo: ${formatRupiah(saldoBaru)}`,
+🧩 ID Layanan: \`${orderData.layananId || '-'}\`
+📱 Layanan: ${orderData.layanan || '-'}
+🌐 Negara: ${orderData.negara || '-'}
+📞 Nomor: \`${orderData.nomor || '-'}\`
+ℹ️ Batas waktu layanan tercapai. Pesanan otomatis dibatalkan.
+💰 Refund: ❌ Tidak ada pengembalian saldo
+💳 Saldo tersisa: *${formatRupiah(saldoBaru)}*
+
+Terima kasih telah menggunakan layanan kami.`,
         { parse_mode: 'Markdown' }
       ).catch(() => {});
     } catch (e) {}
@@ -262,7 +254,7 @@ function scheduleServer2AutoExpire(bot, db, settings, userId, chatId, orderId, a
 
 
 async function processServer2ExpiryOrder(db, settings, userId, order) {
-  return forceExpireServer2Order(db, settings, userId, order, 'Auto expired 15 menit (watcher)');
+  return forceExpireServer2Order(db, settings, userId, order, 'Pesanan telah expired (watcher 15 menit)');
 }
 
 function startServer2ExpiryWatcher(bot, db, settings) {
@@ -395,6 +387,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
 
         await db.addOrderHistory(userId, {
           orderId,
+          layananId: `${target.code}`,
           layanan: `${target.layanan}`,
           nomor: order.data.number,
           harga: finalPrice,
@@ -402,6 +395,7 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
           status: 'pending',
           server: 'server2',
           operator,
+          negaraId: `${countryId}`,
           negara: capitalizeWords(countryName)
         });
 
@@ -456,8 +450,23 @@ module.exports = (bot, db, settings, pendingDeposits, query) => {
         const orderLocal = history.find((x) => String(x.orderId) === String(orderId));
         const createdAt = new Date(orderLocal?.tanggal || Date.now()).getTime();
         if (Date.now() - createdAt >= SERVER2_EXPIRE_MINUTES * 60 * 1000) {
-          await bot.answerCallbackQuery(query.id, { text: 'Order expired 15 menit, auto cancel...', show_alert: true });
-          await forceExpireServer2Order(db, settings, userId, orderLocal || { orderId, harga: 0 }, 'Auto expired 15 menit saat cek otp');
+          await bot.answerCallbackQuery(query.id, { text: '⌛ Pesanan telah expired.', show_alert: true });
+          await forceExpireServer2Order(db, settings, userId, orderLocal || { orderId, harga: 0 }, 'Pesanan telah expired saat cek OTP');
+          const saldoBaru = await db.cekSaldo(userId);
+          const expiredCaption = `⌛ *PESANAN EXPIRED/HANGUS*\n\n` +
+            `🆔 Order: \`${orderId}\`\n` +
+            `🧩 ID Layanan: \`${orderLocal?.layananId || '-'}\`\n` +
+            `📱 Layanan: ${orderLocal?.layanan || '-'}\n` +
+            `🌐 Negara: ${orderLocal?.negara || '-'}\n` +
+            `📞 Nomor: \`${orderLocal?.nomor || '-'}\`\n` +
+            `ℹ️ Batas waktu layanan tercapai. Pesanan otomatis dibatalkan.\n` +
+            `💰 Refund: ❌ Tidak ada pengembalian saldo\n` +
+            `💳 Saldo tersisa: *${formatRupiah(saldoBaru)}*\n\n` +
+            `Terima kasih telah menggunakan layanan kami.`;
+          await smartEdit(bot, query, expiredCaption, {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: [[{ text: '🏠 Menu', callback_data: 'start' }]] }
+          });
           return;
         }
 
